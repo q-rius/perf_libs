@@ -30,7 +30,7 @@ template<typename T, std::size_t size, bool force_page_fault_at_init=true> requi
 class UninitializedStorage
 {
 public:
-    constexpr UninitializedStorage()
+    constexpr UninitializedStorage() noexcept
     {
         assert(test_alignment(storage[0], std::max(alignof(T), cacheline_size)));
         if constexpr(force_page_fault_at_init)
@@ -44,7 +44,7 @@ public:
     }
     constexpr T& operator [] (std::size_t at) noexcept
     {
-        return *std::launder(std::bit_cast<T*>(&storage[at*sizeof(T)])); // TODO: Do we need to launder these?
+        return *std::launder(std::bit_cast<T*>(&storage[at*sizeof(T)]));
     }
 
     constexpr T const& operator [] (std::size_t at) const noexcept
@@ -69,6 +69,11 @@ template<typename T, std::size_t reader_count_, std::size_t capacity_, bool read
 class RingBuff;
 
 ///
+/// This is the first of the two implementations of MultiCast Ringbuffers in this file.
+/// Each built for different usecases and are benchmarked to perform better than most implementations
+/// that were tested.
+///
+
 /// A single writer multiple reader ringbuffer.
 /// This is a multicast ringbuffer i.e. every message is effectively a broadcast to every reader.
 /// Not the same usecase as load balancing where no reader reads the same message.
@@ -76,7 +81,7 @@ class RingBuff;
 /// This can also be used as a single writer single reader ringbuffer.
 /// It is faster than many single producer single consumer ringbuffers.
 ///
-/// It's very 'fast' with no locks or rmw operations and reduces the possibility of cacheline contention
+/// It's very 'fast' with no locks, rmw operations and reduces the possibility of cacheline contention
 /// the between the writer and readers.
 /// It's based on seqlocks.
 /// Each entry in the ringbuffer is protected by a seqlock which leads to certain interesting properties
@@ -166,7 +171,7 @@ public:
     class Reader
     {
     public:
-        Reader() = default; // This should be deleted but makes hayhem with Reader inside an std::array
+        Reader() = default; // This should be deleted but makes mayhem with Reader inside an std::array
 
         constexpr Reader(RingBuff& ringbuff) noexcept
             : data{0, &ringbuff}
@@ -174,7 +179,7 @@ public:
 
         constexpr bool data_available() const noexcept
         {
-            assert(data.ringbuff); // Need this to ensure our invariance which couldn't be enforced by deleting the default constructor
+            assert(data.ringbuff);
             return data.ringbuff->seq_locks[data.ringbuff->index(data.seqno)].read_ready(data.seqno);
         }
 
@@ -216,7 +221,7 @@ public:
         struct
         {
             Seqno     seqno{0};
-            RingBuff* ringbuff{nullptr}; // TODO:Should have been a reference but a limitation of std::array.
+            RingBuff* ringbuff{nullptr}; // TODO:Should have been a reference but forced by std::array.
         }data;
         CachelinePadd<decltype(data)> padd;
     };
@@ -310,11 +315,13 @@ public:
     }
 
     ///
+    /// Sample usage of the batched writer.
+    ///
     /// auto writer = ringbuf.get_writer();
-    /// auto slots = writer.acquire(); // May spin/block or do other work untill slots becomes non-zero
+    /// auto slots = writer.acquire(); // User may spin, block or do other useful work untill slots becomes non-zero
     /// writer.emplace(); // Create your object on all slots thus acquired.
-    /// emplacing on more slots will break the ringbuffer
-    /// emplacing on less slots is fine but commit() will only
+    ///                   // Emplacing on more slots will break the ringbuffer
+    ///                   // Emplacing on less slots is fine but commit() will only
     /// commit as many slots that were emplaced.
     /// writer.commit(); // acquire emplace commit has to happen in this order.
     ///
