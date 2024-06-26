@@ -1,2 +1,2 @@
 # perf_libs
-Some fast and modern c++ implementations
+Penning some some fast and modern c++ implementations based on some thoughts/ideas from long ago.
