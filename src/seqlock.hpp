@@ -7,12 +7,15 @@
 namespace qrius
 {
 
+///  
+/// This is a Seqlock implementation used by multicast_ringbuff implementations.
+///
 template<typename T> requires (std::is_trivially_copyable_v<T> && std::is_trivially_destructible_v<T>)
-class SeqLock
+class Seqlock
 {
 public:
     using ValueType = T;
-    using Seqno = std::uint64_t;
+    using Seqno     = std::uint64_t;
 
     static_assert(std::atomic<Seqno>::is_always_lock_free && "can't support fast seqlock in this architecture");
 
@@ -22,7 +25,11 @@ public:
     /// Read will provide back the same associated seqno.
     ///
     /// Seqno which is 64 bit must be monotonically increasing.
-    /// Overflow will result in undefined behavior for this implementation.
+    ///
+    /// Seqno in the context of the ringbuffer implementation that uses this,
+    /// is refers to the count of the latest item being written to the ringbuffer.
+    ///
+    /// Seqno overflow will result in undefined behavior for this implementation.
     /// This may not be as bad a limitation in practice, incrementing by 1 per cycle
     /// would need ~98 years to overflow on a 3GHZ processor.
     ///
