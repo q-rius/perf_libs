@@ -223,7 +223,7 @@ static void concurrent_randomized_test(std::size_t test_items=1'000'000UL) noexc
 static void seqlock_test()
 {
     {
-        qrius::SeqLock<int*> seqlock;
+        qrius::Seqlock<int*> seqlock;
         seqlock.emplace(0UL, nullptr);
         assert(seqlock.read_ready(0UL));
         auto [result, seqno] = seqlock.read();
@@ -238,7 +238,7 @@ static void seqlock_test()
             std::uint64_t c{0};
             bool operator == (Data const& rhs) const = default;
         };
-        qrius::SeqLock<Data> seqlock;
+        qrius::Seqlock<Data> seqlock;
         seqlock.emplace(100UL, Data{1, 1, 1});
         assert(seqlock.read_ready(35UL));
         auto [result, seqno] = seqlock.read();
@@ -256,7 +256,7 @@ void concurrent_seqlock_test(std::size_t test_items)
         std::uint64_t c{0};
         bool operator == (Data const& rhs) const = default;
     };
-    qrius::SeqLock<Data> seqlock;
+    qrius::Seqlock<Data> seqlock;
     static_assert(sizeof(seqlock) < qrius::cacheline_size);
     std::barrier start_barrier(reader_count + 1);
     std::jthread writer(

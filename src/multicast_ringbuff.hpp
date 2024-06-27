@@ -125,7 +125,7 @@ public:
     static auto constexpr capacity = capacity_;
 
     using ValueType = T;
-    using Seqno = typename SeqLock<T>::Seqno;
+    using Seqno = typename Seqlock<T>::Seqno;
 
     constexpr RingBuff() noexcept
         : writer(*this)
@@ -165,7 +165,7 @@ public:
             Seqno     seqno{0};
             RingBuff& ringbuff;
         }data;
-        CachelinePadd<decltype(data)> padd;
+        CachelinePadd<decltype(data)> padd{};
     };
 
     class Reader
@@ -223,7 +223,7 @@ public:
             Seqno     seqno{0};
             RingBuff* ringbuff{nullptr}; // TODO:Should have been a reference but forced by std::array.
         }data;
-        CachelinePadd<decltype(data)> padd;
+        CachelinePadd<decltype(data)> padd{};
     };
 
 private:
@@ -234,10 +234,10 @@ private:
         return seqno & (capacity-1);
     }
 
-    alignas(cacheline_align<Writer>) Writer writer;
-    alignas(cacheline_align<Reader>) std::array<Reader, reader_count> readers;
-    alignas(cacheline_align<SeqLock<T>>) std::array<SeqLock<T>, capacity> seq_locks;
-    CachelinePadd<decltype(seq_locks)> padd;
+    alignas(cacheline_align<Writer>) Writer                                 writer;
+    alignas(cacheline_align<Reader>) std::array<Reader, reader_count>       readers;
+    alignas(cacheline_align<Seqlock<T>>) std::array<Seqlock<T>, capacity>   seq_locks;
+    CachelinePadd<decltype(seq_locks)>                                      padd{};
 };
 
 template<typename RingBuff, typename Func>
@@ -245,22 +245,32 @@ void read_all(typename RingBuff::Reader& reader, Func&& func)
     noexcept(std::is_nothrow_invocable_v<Func, typename RingBuff::ValueType>);
 
 ///
-/// Multicast queue - single producer multiple consumer
+/// Multicast queue - single producer multiple consumer.
+/// This is another fast implementation with different characteristics.
+///
+/// Writer & Producer are used interchangeably.
+/// Reader & Consumer are used interchangeably.
+///
 /// Each consumer reads every message i.e. the intention is to not load balance
 /// across consumers.
 /// Writer will block if the slowest consumer isn't making progress 'fast enough'.
 /// Perf tested for high throughput.
 ///
 /// No latency benchmarks yet. Theoretically this should be as fast as it gets.
-/// If the desire is for extremely low variance on latency distribution,
+/// If the intention is to minimize variance of the latency distribution,
 /// you might still want to benchmark before using this.
 ///
 /// You may use it as single producer single consumer queue by setting readers = 1.
 /// This is still much faster than other SPSC Queues that were part of the
 /// benchmarks.
-/// It may not scale well as consumers count increases especially for small ringbuffer sizes
-/// since writer has to snoop the cachelines of all readers when writer laps
-/// the smallest of the previously snooped positions of the readers.
+/// No locks, rmw operations.
+/// Also minimizes the number of access to the shared cacheline between reader and writer.
+/// This makes a huge difference to the throughput compared to say folly or boost spsc queues.
+
+/// Note this may not scale well in terms of throughput if consumer count increases especially
+/// for small ringbuffer sizes, since writer has to snoop the cachelines of all readers.
+/// This only happens when writer laps the smallest of the previously snooped positions
+/// of the readers.
 ///
 /// Larger the ringbuffer better the writer scales.
 ///
@@ -274,10 +284,10 @@ void read_all(typename RingBuff::Reader& reader, Func&& func)
 /// Even with no batching the performance measured is significantly higher than other
 /// candidates that were benchmarked.
 ///
-/// This destroys the elements only when lapping since we don't
-/// ref count the readers to prevent r-m-w operations
+/// If reader count is greater than 1, this implementation destroys the elements only
+/// in the writer thread, when lapping since we don't ref count the readers to prevent r-m-w operations.
 /// This can be a big disadvantage if we need to release resources that are in T in a 'realtime' fashion
-/// For e.g. T owns an fd that needs to released on time (poor example but you get the point)
+/// For e.g. T owns an fd that needs to released after all readers are done with it (a poor example but conveys the point).
 ///
 /// Note T can not be a C array. Use std::array instead.
 /// For the same reasons why std::vector doesn't support C array.
@@ -288,8 +298,7 @@ void read_all(typename RingBuff::Reader& reader, Func&& func)
 /// C++20 onwards provides various capabilities to bring an object into existence
 /// via implicit object creation, std::launder, std::start_lifetime_as etc.
 /// So to have well defined behavior T must have at least one trivial constructor and
-/// must be trivially destructible (though these requirements are not enforced).
-///
+/// must be trivially destructible (though these requirements are not enforced currently).
 ///
 /// From reading more resources/references for comparison online, in theory, this is a multicast
 /// ringbuffer equivalent to a special case of disruptor pattern where One producer is
@@ -300,14 +309,15 @@ template<typename T, std::size_t reader_count_, std::size_t capacity_>
     requires (reader_count_>0UL &&
               capacity_>0UL &&
               !(capacity_ & (capacity_-1)))
-class RingBuff<T, reader_count_, capacity_, false> // users should manage the alignment of RingBuff in their allocator
+class RingBuff<T, reader_count_, capacity_, false>
 {
 public:
-    static auto constexpr reader_count = reader_count_;
-    static auto constexpr capacity = capacity_;
+    static auto constexpr capacity      = capacity_;
+    static auto constexpr reader_count  = reader_count_;
 
-    using ValueType = T;
-    using Seqno = std::size_t;
+    using ValueType                     = T;
+    using Seqno                         = std::size_t;
+
     constexpr RingBuff() noexcept
         : writer(*this)
     {
@@ -319,9 +329,10 @@ public:
     ///
     /// auto writer = ringbuf.get_writer();
     /// auto slots = writer.acquire(); // User may spin, block or do other useful work untill slots becomes non-zero
-    /// writer.emplace(); // Create your object on all slots thus acquired.
-    ///                   // Emplacing on more slots will break the ringbuffer
-    ///                   // Emplacing on less slots is fine but commit() will only
+    /// for(auto i=0UL; i!= slots; ++i)
+    ///     writer.emplace(); // Create your object on all slots thus acquired.
+    ///                       // Emplacing on more slots will break the ringbuffer
+    ///                       // Emplacing on less slots is fine but commit() will only
     /// commit as many slots that were emplaced.
     /// writer.commit(); // acquire emplace commit has to happen in this order.
     ///
@@ -352,9 +363,12 @@ public:
             auto seqno = committed_seqno.load(std::memory_order_relaxed);
             if(seqno == cached_reader_seqno + capacity) [[unlikely]]
             {
-                cached_reader_seqno = ringbuff.snoop_readers();
+                cached_reader_seqno = ringbuff.snoop_readers(); // Snoop the readers cachelines only when needed.
             }
-            if(seqno == cached_reader_seqno + capacity) [[unlikely]] return false;
+            if(seqno == cached_reader_seqno + capacity) [[unlikely]]
+            {
+                return false;
+            }
             if constexpr (reader_count > 1 && !std::is_trivially_destructible_v<T>) // This also makes it broken if construction later throws i.e. we might destroy the same object again
             {
                 if(seqno > capacity)
@@ -367,6 +381,7 @@ public:
             return true;
         }
         ///
+        /// Batched writes.
         /// Acquire up to max_slots for writing
         /// Make sure to always acquire the needed slots for emplacing
         /// and commit all slots acquired in one call afterwards
@@ -438,11 +453,11 @@ public:
             return committed_seqno.load(std::memory_order_acquire);
         }
 
-        Seqno cached_reader_seqno{0};
-        Seqno in_progress_seqno{0};
-        RingBuff& ringbuff;
-        alignas(cacheline_size) std::atomic<Seqno> committed_seqno{0};
-        CachelinePadd<decltype(committed_seqno)> padd;
+        Seqno                                       cached_reader_seqno{0};
+        Seqno                                       in_progress_seqno{0};
+        RingBuff                                    &ringbuff;
+        alignas(cacheline_size) std::atomic<Seqno>  committed_seqno{0};
+        CachelinePadd<decltype(committed_seqno)>    padd{};
     };
 
     class Reader
@@ -532,11 +547,11 @@ public:
             return committed_seqno.load(std::memory_order_acquire);
         }
 
-        Seqno cached_writer_seqno{0};
-        Seqno in_progress_seqno{0};
-        RingBuff* ringbuff{nullptr}; // Reference preferred but std::array forces this.
-        alignas(cacheline_size) std::atomic<Seqno> committed_seqno{0};
-        CachelinePadd<decltype(committed_seqno)>   padd;
+        Seqno                                       cached_writer_seqno{0};
+        Seqno                                       in_progress_seqno{0};
+        RingBuff                                   *ringbuff{nullptr}; // TODO: Reference preferred but std::array forces this.
+        alignas(cacheline_size) std::atomic<Seqno>  committed_seqno{0};
+        CachelinePadd<decltype(committed_seqno)>    padd{};
     };
 
     constexpr Writer& get_writer() noexcept
@@ -598,7 +613,7 @@ private:
     alignas(cacheline_align<Writer>) Writer                             writer;
     alignas(cacheline_align<Reader>) std::array<Reader, reader_count>   readers;
     alignas(cacheline_align<T>) UninitializedStorage<T, capacity, true> storage;
-    CachelinePadd<decltype(storage)>                                    padd;
+    CachelinePadd<decltype(storage)>                                    padd{};
 };
 
 template<typename RingBuff, typename Func>

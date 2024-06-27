@@ -1,7 +1,7 @@
 #include "multicast_ringbuff.hpp"
 #include "perf_utils.hpp"
-#include "external/folly/ProducerConsumerQueue.h"
-#include "external/rigtorp/SPSCQueue.h"
+#include "external_for_bench/folly/ProducerConsumerQueue.h"
+#include "external_for_bench/rigtorp/SPSCQueue.h"
 
 #include <atomic>
 #include <future>
@@ -20,20 +20,20 @@ struct InvalidReadException: std::runtime_error
 };
 
 ///
-/// Here we attempt comprehensive set of throughput tests for data structures
+/// Here we attempt a comprehensive set of throughput tests for data structures
 /// that are shared across threads - writer vs readers.
 /// All tests have been performed on x86_64.
 /// 1. Simple local load, store of std::uint64_t - to see the memory parallelism in action.
 /// 2. Shared load, store of std::uint64_t
 /// 3. Seqlock - single writer multiple readers
-/// 4. Our performance optimized Seqlock based Multicast RingBuffer
+/// 4. Our performance optimized Seqlock based Multicast RingBuffer that never blocks the writer.
 /// 5. Our performance optimized Multicast RingBuffer where writer can wait for readers to catch up.
-/// 6. Compare Known fast implementations referenced/taken unmodified - refer external/ directory.
+/// 6. Compare Known fast implementations of Single Producer Single Consumer Ringbuffers- refer external_for_bench/ directory.
 ///
 /// @brief 
-/// @tparam ConstructFunc Constructs the data structure being performance tested in the writer thread. 
-/// @tparam EmplaceFunc Creates/Writes data to the shared data structure being performance tested.
-/// @tparam ReadFunc Read function to be invoked in the reader threads
+/// @tparam ConstructFunc Constructs the data structure being performance tested in the writer thread (numa aware allocation).
+/// @tparam EmplaceFunc Creates/Writes all test data to the shared data structure being performance tested.
+/// @tparam ReadFunc Reads all data being written to by writer thread - invoked in each reader threads
 /// @tparam reader_count Number of readers/reader threads to be created/tested.
 /// @param cpu_set cpu set to which writer + reader threads need to be glued to (affinity).
 /// @param construct_func
@@ -41,6 +41,9 @@ struct InvalidReadException: std::runtime_error
 /// @param read_func 
 /// @param test_iters Number of items to produced and read. 
 /// @return Returns the final throughput details of each test.
+///
+/// Reader/s cursor/s must reach the last element produced by writer for the tests to finish.
+/// Throughput of the writer, reader, both combined and wasted operations are reported for each test.
 ///
 template<typename ConstructFunc,
          typename EmplaceFunc,
@@ -77,20 +80,31 @@ std::array<qrius::TestResult, reader_count+1>
 #endif
                 if(!qrius::set_curr_thread_affinity(core_id))
                 {
-                    std::cout << "Failed to set affinity of the producer thread to the core " << core_id << '\n';
+                    std::cerr << "Failed to set affinity of the producer thread to the core " << core_id << '\n';
                 }
-                // Idea is to construct the data structure being tested in the writer thread for numa friendly allocaiton.
+                // Construct the data structure being tested in the writer thread for numa friendly allocaiton.
+                // Instead of the thread that sets up the test.
                 auto mc_queue_ptr = construct_func();
                 auto &mc_queue = *mc_queue_ptr;
 
                 // Hand over the data structure being tested to all readers.
-                for(auto& prom : promises) prom.set_value(mc_queue);
+                for(auto& prom : promises)
+                {
+                    prom.set_value(mc_queue);
+                }
 
-                start_barrier.arrive_and_wait(); // Probably not exception safe, might indefinitely wait if one of the threads throw or exit unexpectedly
+                start_barrier.arrive_and_wait(); // May not be exception safe - might indefinitely wait if one of the threads throw or exit unexpectedly
 
+                std::atomic_thread_fence(std::memory_order_seq_cst); // Above barrier might be enough.
                 auto writer_start_ts = std::chrono::steady_clock::now();
+
+                std::atomic_signal_fence(std::memory_order_seq_cst); // make sure compiler doesn't reorder
                 auto [write_count, wasted_ops] = emplace_func(mc_queue, test_iters);
+                std::atomic_signal_fence(std::memory_order_seq_cst);
+
                 auto writer_end_ts = std::chrono::steady_clock::now();
+                std::atomic_thread_fence(std::memory_order_seq_cst); // Serialize instructions
+
                 result[0] = {writer_start_ts, writer_end_ts, write_count, wasted_ops};
                 end_barrier.arrive_and_wait(); // Probably not exception safe
             }
@@ -114,7 +128,7 @@ std::array<qrius::TestResult, reader_count+1>
 #endif
                     if(!qrius::set_curr_thread_affinity(core_id))
                     {
-                        std::cout << "Failed to set affinity of the reader thread "
+                        std::cerr << "Failed to set affinity of the reader thread "
                                   << reader_index
                                   << " to the core "
                                   << core_id
@@ -123,9 +137,17 @@ std::array<qrius::TestResult, reader_count+1>
                     futures[reader_index].wait(); // May be timeout for exception safety from other threads exiting quickly
                     auto& mc_queue = futures[reader_index].get();
                     start_barrier.arrive_and_wait();
-                    auto reader_start_ts = std::chrono::steady_clock::now(); // TODO: need a timing barrier here to prevent reordering
+
+                    std::atomic_thread_fence(std::memory_order_seq_cst); // Above barrier might be enough though but doesn't hurt.
+                    auto reader_start_ts = std::chrono::steady_clock::now(); // May need a fence/barrier here to prevent reordering. X86_64 assembly looks ok
+
+                    std::atomic_signal_fence(std::memory_order_seq_cst); // So that compiler doesn't reorder.
                     auto [read_count, wasted_ops] = read_func(mc_queue, reader_index, test_iters);
+                    std::atomic_signal_fence(std::memory_order_seq_cst);
+
                     auto reader_end_ts = std::chrono::steady_clock::now();
+                    std::atomic_thread_fence(std::memory_order_seq_cst);
+
                     result[reader_index+1] = {reader_start_ts, reader_end_ts, read_count, wasted_ops};
                     end_barrier.arrive_and_wait();
                 }
@@ -249,8 +271,8 @@ void perf_test_local_store_load(qrius::CpuSet const& cpu_set, std::size_t test_i
         atomic_pair_ptr->load_var.var = rand_val;
         return atomic_pair_ptr;
     };
-
-    auto emplace_func = [](auto& atomic_pair, std::size_t test_iters) __attribute__((noinline, hot))
+    auto emplace_func = [](auto& atomic_pair,
+                           std::size_t test_iters) __attribute__((noinline, hot))
     {
         for(auto item=0UL; item != test_iters; ++item)
         {
@@ -258,7 +280,9 @@ void perf_test_local_store_load(qrius::CpuSet const& cpu_set, std::size_t test_i
         }
         return std::pair{test_iters, 0UL};
     };
-    auto read_func = [=](auto& atomic_pair, std::size_t reader_index[[maybe_unused]], std::size_t test_iters) __attribute__((noinline, hot))
+    auto read_func = [=](auto& atomic_pair,
+                         std::size_t reader_index[[maybe_unused]],
+                         std::size_t test_iters) __attribute__((noinline, hot))
     {
         for(auto item=0UL; item != test_iters; ++item)
         {
@@ -364,11 +388,11 @@ void perf_test_ping_pong_store_load(qrius::CpuSet const& cpu_set, std::size_t te
 }
 
 template<typename T>
-struct PaddedSeqLock
+struct PaddedSeqlock
 {
-    using SeqLock = qrius::SeqLock<T>;
-    alignas(qrius::cacheline_align<SeqLock>) SeqLock seqlock;
-    qrius::CachelinePadd<SeqLock> padd;
+    using Seqlock = qrius::Seqlock<T>;
+    alignas(qrius::cacheline_align<Seqlock>) Seqlock seqlock;
+    qrius::CachelinePadd<Seqlock> padd;
 };
 
 template<typename T, std::size_t readers=1UL>
@@ -377,17 +401,17 @@ void perf_test_qrius_seqlock(qrius::CpuSet const& cpu_set, std::size_t test_iter
 {
     std::cout << "\nseqlock test_iterations=" << test_iters << '\n';
 
-    using SeqLock = PaddedSeqLock<T>;
+    using Seqlock = PaddedSeqlock<T>;
     auto construct_func = []()
     {
-        auto seqlock_ptr = std::make_unique<SeqLock>();
-        static_assert(alignof(SeqLock) >= qrius::cacheline_size);
-        static_assert(!(sizeof(SeqLock) % qrius::cacheline_size));
+        auto seqlock_ptr = std::make_unique<Seqlock>();
+        static_assert(alignof(Seqlock) >= qrius::cacheline_size);
+        static_assert(!(sizeof(Seqlock) % qrius::cacheline_size));
         assert(qrius::test_alignment(*seqlock_ptr, qrius::cacheline_size));
         return seqlock_ptr;
     };
     auto emplace_func = [](auto& padded_seqlock,
-                           std::size_t test_iters) __attribute__((noinline, hot))
+                           std::size_t test_iters) __attribute__((noinline, hot)) // We don't want this inlined lest compiler might have more ideas to reorder these across timing calls.
     {
         for(auto item=0UL; item != test_iters; ++item)
         {
@@ -1036,7 +1060,8 @@ int main(int argc, char** argv)
                 // This is the highest possible throughput with no cacheline contention from
                 // reader spin reading the cacheline exclusive to the writer.
                 //
-                // These batching of writes to 32 significantly improves the overall throughput.
+                // These batching of writes (with max_slots acquired at a time set to  8-32) significantly
+                // improves the overall throughput in tests.
                 perf_test_qrius_blocking_ringbuff<std::uint64_t, capacity, 0, 32>(cpu_set, test_iters);
                 perf_test_qrius_blocking_ringbuff<std::uint64_t, capacity, 1, 32, 1>(cpu_set, test_iters);
                 perf_test_qrius_blocking_ringbuff<std::uint64_t, capacity, 1, 2,  1>(cpu_set, test_iters);
