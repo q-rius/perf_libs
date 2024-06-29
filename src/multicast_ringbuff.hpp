@@ -3,6 +3,7 @@
 
 #include "perf_utils.hpp"
 #include "seqlock.hpp"
+#include "uninitialized_storage.hpp"
 
 #include <cstddef>
 #include <tuple>
@@ -21,49 +22,6 @@
 
 namespace qrius
 {
-
-///
-/// All ring buffer implementations below are value types with compile time sizes.
-/// It just works for all my common use cases including shared memory use cases too.
-///
-template<typename T, std::size_t size, bool force_page_fault_at_init=true> requires (size > 0UL)
-class UninitializedStorage
-{
-public:
-    constexpr UninitializedStorage() noexcept
-    {
-        assert(test_alignment(storage[0], std::max(alignof(T), cacheline_size)));
-        if constexpr(force_page_fault_at_init)
-        {
-            for(auto i=0UL; i<sizeof(storage); i+=page_size)
-            {
-                storage[i] = std::byte{'\0'};
-            }
-            storage[sizeof(storage)-1] = std::byte{'\0'};
-        }
-    }
-    constexpr T& operator [] (std::size_t at) noexcept
-    {
-        return *std::launder(std::bit_cast<T*>(&storage[at*sizeof(T)]));
-    }
-
-    constexpr T const& operator [] (std::size_t at) const noexcept
-    {
-        return *std::launder(std::bit_cast<T const*>(&storage[at*sizeof(T)]));
-    }
-
-    constexpr void construct_at(std::size_t at, auto&&... args) noexcept(std::is_nothrow_constructible_v<T, decltype(args)...>)
-    {
-        std::construct_at(std::launder(std::bit_cast<T*>(&storage[at*sizeof(T)])), std::forward<decltype(args)>(args)...);
-    }
-
-    constexpr void destroy_at(std::size_t at) noexcept
-    {
-        std::destroy_at(std::launder(std::bit_cast<T*>(&storage[at*sizeof(T)])));
-    }
-private:
-    alignas(alignof(T)) std::byte storage[sizeof(T)*size];
-};
 
 template<typename T, std::size_t reader_count_, std::size_t capacity_, bool readers_may_join_late>
 class RingBuff;
@@ -91,7 +49,7 @@ class RingBuff;
 /// If the writer laps the reader, reader will LOSE all data up to the current point and
 /// will start picking up where the writer is currently.
 /// This leads to data loss for very slow readers that can't keep up with writer.
-/// There is no way to prevent this due to the way it designed and the usecase that a slow reader
+/// There is no way to prevent this due to the way it is designed and the usecase that a slow reader
 /// should not slow down or block the writer or other readers.
 /// If the usecase is for the writer to block to prevent lapping the slowest reader, try the
 /// next implementation which optionally allows writer to wait until readers are caught up.
@@ -327,7 +285,7 @@ public:
     ///
     /// Sample usage of the batched writer.
     ///
-    /// auto writer = ringbuf.get_writer();
+    /// auto &writer = ringbuf.get_writer();
     /// auto slots = writer.acquire(); // User may spin, block or do other useful work untill slots becomes non-zero
     /// for(auto i=0UL; i!= slots; ++i)
     ///     writer.emplace(); // Create your object on all slots thus acquired.
@@ -348,9 +306,8 @@ public:
 
         ///
         /// This is a simpler write method that can not be used with batching APIs.
-        /// i.e. use this API to write one element at a time or a
-        /// combination of acquire(), emplace(), emplace(), ..., commit()
-        /// but not together.
+        /// i.e. use this API to write one element at a time or batch api (a combination
+        /// of acquire(), emplace(), emplace(), ..., commit()) but not together.
         ///
         /// If batched writes is not your usecase, this alternative might be faster by 20% (from the perf tests).
         ///

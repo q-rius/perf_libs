@@ -9,6 +9,7 @@ namespace qrius
 
 ///  
 /// This is a Seqlock implementation used by multicast_ringbuff implementations.
+/// APIs of which are designed for this specific usecase.
 ///
 template<typename T> requires (std::is_trivially_copyable_v<T> && std::is_trivially_destructible_v<T>)
 class Seqlock
