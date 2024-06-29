@@ -150,19 +150,19 @@ inline void clflush_region(T const* region, std::size_t size) noexcept
 
 inline void force_page_fault(std::byte* region, std::size_t size) noexcept
 {
+    assert(size>0);
     for(auto byte=region; byte < region+size; byte += page_size)
     {
         *byte = std::byte{'\0'};
     }
-    *(region+size) = std::byte{'\0'};
+    *(region+size-1) = std::byte{'\0'};
 }
 
 template<std::size_t bytes>
 inline void force_page_fault_stack() noexcept
 {
-    // TODO: Bad use of volatile.
-    // Compiler is free to optimize this out completely.
-    volatile std::byte array[bytes];
+    std::byte array[bytes];
+    asm volatile("" : : "r,m"(array) : "memory"); // Like DoNotOptimize in MicroBenches.
     for(auto i=0UL; i<sizeof(array); i+=page_size)
     {
         array[i] = std::byte{'\0'};
