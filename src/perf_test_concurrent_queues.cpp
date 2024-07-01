@@ -48,7 +48,8 @@ struct InvalidReadException: std::runtime_error
 template<typename ConstructFunc,
          typename EmplaceFunc,
          typename ReadFunc,
-         std::size_t reader_count=1>
+         std::size_t reader_count=1,
+         std::size_t stack_prefault=(1UL<<16)>
 std::array<qrius::TestResult, reader_count+1>
     perf_test(qrius::CpuSet const& cpu_set,
               ConstructFunc construct_func,
@@ -70,6 +71,7 @@ std::array<qrius::TestResult, reader_count+1>
         std::jthread producer(
             [&]()
             {
+                qrius::force_page_fault_stack<stack_prefault>();
                 auto core_id = qrius::nth_set_bit(cpu_set, 1UL);
 #ifndef NDEBUG
                 std::cout << "starting writer   target = "
@@ -116,6 +118,7 @@ std::array<qrius::TestResult, reader_count+1>
             reader_thread = std::jthread(
                 [&, reader_index]()
                 {
+                    qrius::force_page_fault_stack<stack_prefault>();
                     auto core_id = qrius::nth_set_bit(cpu_set, reader_index + 2); // producer takes the first set cpu
 #ifndef NDEBUG
                     std::cout << "starting reader "
