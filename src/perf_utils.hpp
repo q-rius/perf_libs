@@ -166,12 +166,8 @@ template<std::size_t bytes>
 inline void force_page_fault_stack() noexcept
 {
     std::byte array[bytes];
-    asm volatile("" : : "r,m"(array) : "memory"); // Like DoNotOptimize in MicroBenches.
-    for(auto i=0UL; i<sizeof(array); i+=page_size)
-    {
-        array[i] = std::byte{'\0'};
-    }
-    array[sizeof(array) - 1UL] = std::byte{'\0'};
+    asm volatile("" ::"m"(array) :"memory"); // Like DoNotOptimize in MicroBenches.
+    force_page_fault(array, bytes);
 }
 
 
