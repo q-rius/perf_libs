@@ -243,7 +243,7 @@ static void analyze_result(std::array<qrius::TestResult, size> const& result)
 template<typename T> requires (std::atomic<T>::is_always_lock_free)
 struct AtomicVar
 {
-    alignas(std::max(qrius::cacheline_size, alignof(T))) std::atomic<T> var;
+    alignas(qrius::cacheline_align<T>) std::atomic<T> var;
     qrius::CachelinePadd<decltype(var)> padd{};
 };
 
@@ -407,7 +407,7 @@ void perf_test_qrius_seqlock(qrius::CpuSet const& cpu_set, std::size_t test_iter
         auto seqlock_ptr = std::make_unique<Seqlock>();
         static_assert(alignof(Seqlock) >= qrius::cacheline_size);
         static_assert(!(sizeof(Seqlock) % qrius::cacheline_size));
-        assert(qrius::test_alignment(*seqlock_ptr, qrius::cacheline_size));
+        assert(qrius::test_cacheline_align(*seqlock_ptr));
         return seqlock_ptr;
     };
     auto emplace_func = [](auto& padded_seqlock,
@@ -504,7 +504,7 @@ template<std::size_t capacity>
 struct Region
 {
     alignas(qrius::cacheline_size) std::array<std::size_t, capacity> elements{};
-    qrius::CachelinePadd<decltype(elements)> padd{};
+    qrius::CachelinePadd<decltype(elements)>                         padd{};
 };
 
 template<std::size_t capacity, std::size_t readers=1UL>
@@ -516,7 +516,7 @@ void perf_test_shared_region(qrius::CpuSet const& cpu_set, std::size_t test_iter
     {
         auto shared_region_ptr = std::make_unique<Region<capacity>>();
         shared_region_ptr->elements.fill(std::numeric_limits<std::size_t>::max());
-        assert(qrius::test_alignment(*shared_region_ptr, qrius::cacheline_size));
+        assert(qrius::test_cacheline_align(*shared_region_ptr));
         static_assert(!(sizeof(Region<capacity>)%qrius::cacheline_size));
         using namespace std::chrono_literals;
         qrius::clflush(*shared_region_ptr);
@@ -560,7 +560,7 @@ struct RegionSeqno
 {
     alignas(qrius::cacheline_size) std::atomic<std::size_t> seqno{0UL};
     alignas(qrius::cacheline_size) std::array<std::size_t, capacity> elements;
-    qrius::CachelinePadd<decltype(elements)> padd;
+    qrius::CachelinePadd<decltype(elements)> padd{};
 };
 
 template<std::size_t capacity, std::size_t readers=1UL>
@@ -573,7 +573,7 @@ void perf_test_shared_region_seqno(qrius::CpuSet const& cpu_set,
     {
         auto shared_region_ptr = std::make_unique<RegionSeqno<capacity>>();
         shared_region_ptr->elements.fill(std::numeric_limits<std::size_t>::max());
-        assert(qrius::test_alignment(*shared_region_ptr, qrius::cacheline_size));
+        assert(qrius::test_cacheline_align(*shared_region_ptr));
         static_assert(!(sizeof(RegionSeqno<capacity>)%qrius::cacheline_size));
         using namespace std::chrono_literals;
         qrius::clflush(*shared_region_ptr);
@@ -635,9 +635,9 @@ void perf_test_qrius_blocking_ringbuff(qrius::CpuSet const& cpu_set,
     auto construct_func = []()
     {
         auto ring_buff_ptr = std::make_unique<MCRingBuff>();
-        assert(test_alignment(*ring_buff_ptr, qrius::cacheline_size));
-        assert(test_alignment(ring_buff_ptr->get_writer(), qrius::cacheline_size));
-        assert(test_alignment(ring_buff_ptr->get_reader(0UL), qrius::cacheline_size));
+        assert(test_cacheline_align(*ring_buff_ptr));
+        assert(test_cacheline_align(ring_buff_ptr->get_writer()));
+        assert(test_cacheline_align(ring_buff_ptr->get_reader(0UL)));
         return ring_buff_ptr;
     };
     auto emplace_func = [](auto& ring_buff,
@@ -734,7 +734,7 @@ void perf_test_folly(qrius::CpuSet const& cpu_set, std::size_t test_iters)
                 ++wasted_ops;
                 asm("pause");
             }
-            auto result = ring_buff.write(item);
+            auto result [[maybe_unused]] = ring_buff.write(item);
             assert(result);
             ++item;
         }
