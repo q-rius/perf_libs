@@ -24,33 +24,33 @@ constexpr inline auto page_size = 4096UL;
 template<typename T>
 inline constexpr std::size_t cacheline_align = std::max(cacheline_size, alignof(T));
 
-namespace detail
-{
-
-template<typename T>
-struct Wrapper
-{
-    T value;
-};
-
-}
-
 ///
 /// Helper for cacheline_padding in bytes for a series of fields that
-/// needs to be grouped together in cachelines.
+/// needs to be grouped together in cachelines inside a struct or class.
 /// struct Foo
 /// {
 ///     int a;
 ///     int& b;
 ///     char c;
-///     std::byte padding[cacheline_padding]
+///     std::byte padding[instead_of_calculating_yourself];
 /// };
-/// This is broken for multiple fields when compiler issues padding between fields.
-/// So works best for a single type.
 ///
-template<typename... T>
-inline constexpr auto cacheline_padding = (sizeof(detail::Wrapper<T>) + ... + 0)%cacheline_size ? cacheline_size - (sizeof(detail::Wrapper<T>) + ... + 0)%cacheline_size : 0UL;
+/// use
+///
+/// struct Foo
+/// {
+///     int  a;
+///     int& b;
+///     char c;
+///     CachelinePadd<int, int&, char> padd{}; // a, b, c will stay in the cacheline assuming Foo is at least aligned to cacheline.
+/// };
+/// Assumes std::tuple generates the same memory layout as a struct with members defined in the same level (non-nested).
+///
 
+template<typename... T>
+inline constexpr auto cacheline_padding = sizeof(std::tuple<T...>) % cacheline_size
+                                                ? cacheline_size - (sizeof(std::tuple<T...>) % cacheline_size)
+                                                : 0UL;
 template<typename T>
 using CachelinePadd = std::byte[cacheline_padding<T>];
 
@@ -66,10 +66,14 @@ using CachelinePadd = std::byte[cacheline_padding<T>];
 #endif
 }
 
-template<typename T>
-inline constexpr bool test_alignment(T const& value, std::size_t alignment=alignof(T))
+inline constexpr bool test_alignment(auto const& value, std::size_t alignment) noexcept
 {
     return std::bit_cast<const std::uintptr_t>(std::addressof(value)) % alignment == 0UL;
+}
+
+inline constexpr bool test_cacheline_align(auto const& value) noexcept
+{
+    return std::bit_cast<const std::uintptr_t>(std::addressof(value)) % cacheline_size == 0UL;
 }
 
 constexpr inline auto max_cpus = 128UL;
@@ -113,7 +117,7 @@ inline void lock_pages() noexcept
     // Ideally, one should walk the address space and specifically lock
     // the required pages via /proc/$pid/maps on Linux.
     //
-    auto rc = mlockall(MCL_CURRENT|MCL_FUTURE);
+    auto rc [[maybe_unused]]= mlockall(MCL_CURRENT|MCL_FUTURE);
 #ifndef NDEBUG
     std::cout << "mlockall rc=" << rc << ", errno=" << (rc==0 ? 0 : errno) << ", errstr="  << (rc == 0 ? "NA" : strerror(errno)) << "\n";
 #endif

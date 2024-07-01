@@ -39,9 +39,8 @@ class RingBuff;
 /// This can also be used as a single writer single reader ringbuffer.
 /// It is faster than many single producer single consumer ringbuffers.
 ///
-/// It's very 'fast' with no locks, rmw operations and reduces the possibility of cacheline contention
-/// the between the writer and readers.
-/// It's based on seqlocks.
+/// It's very 'fast' with no locks, rmw operations and reduces the cacheline contention
+/// between the writer and readers. It's based on seqlocks.
 /// Each entry in the ringbuffer is protected by a seqlock which leads to certain interesting properties
 /// that makes it a unique fit for certain usecases.
 ///
@@ -49,8 +48,9 @@ class RingBuff;
 /// If the writer laps the reader, reader will LOSE all data up to the current point and
 /// will start picking up where the writer is currently.
 /// This leads to data loss for very slow readers that can't keep up with writer.
-/// There is no way to prevent this due to the way it is designed and the usecase that a slow reader
-/// should not slow down or block the writer or other readers.
+/// This is by design and works well for the usecase where a slow reader should not slow
+/// down/block the writer and/or other faster readers.
+///
 /// If the usecase is for the writer to block to prevent lapping the slowest reader, try the
 /// next implementation which optionally allows writer to wait until readers are caught up.
 ///
@@ -89,9 +89,9 @@ public:
         : writer(*this)
     {
         readers.fill(Reader(*this));
-        assert(test_alignment(writer, cacheline_size));
-        assert(test_alignment(readers, cacheline_size));
-        assert(test_alignment(seq_locks, cacheline_size));
+        assert(test_cacheline_align(writer));
+        assert(test_cacheline_align(readers));
+        assert(test_cacheline_align(seq_locks));
     }
 
     constexpr auto& get_writer() noexcept
@@ -300,8 +300,8 @@ public:
         constexpr Writer(RingBuff& ringbuff)
             : ringbuff(ringbuff)
         {
-            assert(test_alignment(committed_seqno, cacheline_size));
-            assert(test_alignment(cached_reader_seqno, cacheline_size));
+            assert(test_cacheline_align(committed_seqno));
+            assert(test_cacheline_align(cached_reader_seqno));
         }
 
         ///
@@ -342,10 +342,13 @@ public:
         /// Acquire up to max_slots for writing
         /// Make sure to always acquire the needed slots for emplacing
         /// and commit all slots acquired in one call afterwards
-        /// This is for batching the producer from hitting the reader's
+        /// This is for batching the writer from hitting the reader's
         /// shared state/cacheline often.
+        /// This may improve performance significantly.
+        /// For e.g. Going from 1 to 32, increases throughput 2.5 times (210M to 510M).
+        /// No improvements were observed increasing it further.
         ///
-        template<std::size_t max_slots=1UL> requires (max_slots != 0UL)// Note: Going from 1 to 32, increases throughput 2.5 times (210M to 510M) and no further improvements afterwards.
+        template<std::size_t max_slots=1UL> requires (max_slots != 0UL)
         constexpr std::size_t acquire() noexcept
         {
             if(in_progress_seqno == cached_reader_seqno + capacity) [[unlikely]] //: No improvement noted and may worsen performance when a reader isn't keeping up
@@ -398,8 +401,8 @@ public:
 
         void test_alignments() const noexcept
         {
-            assert(test_alignment(cached_reader_seqno, cacheline_size));
-            assert(test_alignment(committed_seqno, cacheline_size));
+            assert(test_cacheline_align(cached_reader_seqno));
+            assert(test_cacheline_align(committed_seqno));
         }
 
     private:
@@ -425,8 +428,8 @@ public:
         constexpr Reader(RingBuff& ringbuff) noexcept
             : ringbuff(&ringbuff)
         {
-            assert(test_alignment(committed_seqno, cacheline_size));
-            assert(test_alignment(cached_writer_seqno, cacheline_size));
+            assert(test_cacheline_align(committed_seqno));
+            assert(test_cacheline_align(cached_writer_seqno));
         }
 
         constexpr Reader(Reader const&) = default;
@@ -493,8 +496,8 @@ public:
 
         void test_alignments() const noexcept
         {
-            assert(test_alignment(cached_writer_seqno, cacheline_size));
-            assert(test_alignment(committed_seqno, cacheline_size));
+            assert(test_cacheline_align(cached_writer_seqno));
+            assert(test_cacheline_align(committed_seqno));
         }
     private:
         friend class RingBuff;

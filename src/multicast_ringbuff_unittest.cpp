@@ -1,3 +1,9 @@
+// TODO: Convert to GTest.
+
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include "multicast_ringbuff.hpp"
 #include <cstdint>
 #include <iostream>
@@ -22,7 +28,14 @@ static void perf_utils_test() noexcept
         static_assert(qrius::cacheline_padding<char[130]> == 62UL);
         static_assert(!qrius::cacheline_padding<char[192]>);
         static_assert(qrius::cacheline_padding<char&> == qrius::cacheline_size - sizeof(char*));
-        static_assert(qrius::cacheline_padding<char&, int&, double, int> == qrius::cacheline_size - sizeof(char*) - sizeof(int*) - sizeof(double) - sizeof(int));
+        struct Data
+        {
+            char&   a;
+            int&    b;
+            double  c;
+            int     d;
+        };
+        static_assert(qrius::cacheline_padding<char&, int&, double, int> == qrius::cacheline_size - sizeof(Data));
     }
 }
 

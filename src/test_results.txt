@@ -1,5 +1,6 @@
 Note: These results are from my linux vm which is a very old low power cpu.
 Will present more data from an Alder Lake cpu which shows rigtop::SPSCQueue performing equally well.
+And the Seqlock based ringbuffer runs much faster than others on Alder Lake.
 
 Seqlock based ringbuffer optimized for writes
     writer throughput = 376M msgs/second.
@@ -17,20 +18,17 @@ Seqlock based ringbuffer optimized for writes
     effective system throughput=1.8636e+08 msg/sec, 1.38849 GBPS, 11.927 Gbps, avg_latency=5.36597ns (influenced by latency to start reader threads & scheduling etc.)
 
 Ringbuffer that allows reader to catch up.
-    writer throughput = 379M msgs/second.
-    reader throughput = 367M msgs/second.
+    writer throughput = 417 msgs/second.
+    reader throughput = 402M msgs/second.
 
-
-    MultiCastRingBuff test_iterations=800000000, write_batch=1, read_batch=1                                 
-    starting writer   target = 800000000, core_affinity = 3                                                  
-    starting reader 0 target = 800000000, core_affinity = 4                                                  
+    MultiCastRingBuff test_iterations=800000000, write_batch=1, read_batch=1
     capacity=33554432 elements, readers=1 threads, element_size=8 bytes
-    writer produced 800000000 in 2108549449 ns, wasted_writes= 10842736                                      
-    throughput=3.79408e+08 msgs/sec, 2.82681 GBPS, 24.2821 Gbps, avg_latency=2.63569ns
-    reader 0 read 800000000 in 2179419110ns, wasted_reads= 3464                                              
-    throughput=3.6707e+08 msgs/sec, 2.73489 GBPS, 23.4925 Gbps, avg_latency=2.72427ns
-    started -21881ns after writer                                                                          
-    effective system throughput=3.67074e+08 msg/sec, 2.73491 GBPS, 23.4927 Gbps, avg_latency=2.72425ns (influenced by latency to start reader threads & scheduling etc.)  
+    writer produced 800000000 in 1917642299 ns, wasted_writes= 11334517
+    throughput=4.17179e+08 msgs/sec, 3.10823 GBPS, 26.6995 Gbps, avg_latency=2.39705ns
+    reader 0 read 800000000 in 1986208356ns, wasted_reads= 8453
+    throughput=4.02777e+08 msgs/sec, 3.00093 GBPS, 25.7778 Gbps, avg_latency=2.48276ns
+    started -59233ns after writer
+    effective system throughput=4.02789e+08 msg/sec, 3.00102 GBPS, 25.7785 Gbps, avg_latency=2.48269ns (influenced by latency to start reader threads & scheduling etc.)
 
 folly::SingleProduceSingleConsumer 
     writer throughput = 134M msgs/second.
@@ -52,13 +50,11 @@ The test results in writer going too fast such that it spends more time contendi
 This is clear from wasted_writes stat below.
 I will present the actual number from an Alder Lake later which shows this ringbuffer performing extremely well.
 
-    rigtorp::SPSCQueue, test_iterations=800000000                                                            
-    starting writer   target = 800000000, core_affinity = 3                             
-    starting reader 0 target = 800000000, core_affinity = 4                                                  
-    capacity=33554432 elements, readers=1 threads, element_size=8 bytes                                      
-    writer produced 800000000 in 10322038174 ns, wasted_writes= 163696901               
-    throughput=7.75041e+07 msgs/sec, 0.57745 GBPS, 4.96026 Gbps, avg_latency=12.9025ns                     
-    reader 0 read 800000000 in 10396108326ns, wasted_reads= 4874                                             
-    throughput=7.69519e+07 msgs/sec, 0.573336 GBPS, 4.92492 Gbps, avg_latency=12.9951ns                    
-    started -25817ns after writer                                                                          
-    effective system throughput=7.69521e+07 msg/sec, 0.573338 GBPS, 4.92493 Gbps, avg_latency=12.9951ns (influenced by latency to start reader threads & scheduling etc.)
+    rigtorp::SPSCQueue, test_iterations=800000000
+    capacity=33554432 elements, readers=1 threads, element_size=8 bytes
+    writer produced 800000000 in 2481569451 ns, wasted_writes= 0
+    throughput=3.22377e+08 msgs/sec, 2.40189 GBPS, 20.6321 Gbps, avg_latency=3.10196ns
+    reader 0 read 800000000 in 2481592746ns, wasted_reads= 10676016
+    throughput=3.22374e+08 msgs/sec, 2.40187 GBPS, 20.6319 Gbps, avg_latency=3.10199ns
+    started -23326ns after writer
+    effective system throughput=3.22377e+08 msg/sec, 2.40189 GBPS, 20.6321 Gbps, avg_latency=3.10196ns (influenced by latency to start reader threads & scheduling etc.)
