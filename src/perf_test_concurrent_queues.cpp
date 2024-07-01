@@ -266,9 +266,9 @@ void perf_test_local_store_load(qrius::CpuSet const& cpu_set, std::size_t test_i
     auto construct_func = [=]()
     {
         auto atomic_pair_ptr = std::make_unique<AtomicPair<T>>();
-        assert(qrius::test_alignment(*atomic_pair_ptr, std::max(qrius::cacheline_size, alignof(T))));
-        assert(qrius::test_alignment(atomic_pair_ptr->store_var, std::max(qrius::cacheline_size, alignof(T))));
-        assert(qrius::test_alignment(atomic_pair_ptr->load_var, std::max(qrius::cacheline_size, alignof(T))));
+        assert(qrius::test_cacheline_align(*atomic_pair_ptr));
+        assert(qrius::test_cacheline_align(atomic_pair_ptr->store_var));
+        assert(qrius::test_cacheline_align(atomic_pair_ptr->load_var));
         static_assert(sizeof(AtomicPair<T>) == 2*qrius::cacheline_size);
         static_assert(alignof(AtomicPair<T>) == qrius::cacheline_size);
         atomic_pair_ptr->load_var.var = rand_val;
@@ -309,7 +309,7 @@ void perf_test_shared_store_load(qrius::CpuSet const& cpu_set, std::size_t test_
     auto construct_func = []()
     {
         auto atomic_var_ptr = std::make_unique<AtomicVar<T>>();
-        assert(qrius::test_alignment(*atomic_var_ptr, std::max(qrius::cacheline_size, alignof(T))));
+        assert(qrius::test_cacheline_align(*atomic_var_ptr));
         return atomic_var_ptr;
     };
     auto emplace_func = [](auto& atomic_var, std::size_t test_iters) __attribute__((noinline, hot))
@@ -356,9 +356,9 @@ void perf_test_ping_pong_store_load(qrius::CpuSet const& cpu_set, std::size_t te
         auto atomic_pair_ptr = std::make_unique<AtomicPair<T>>();
         atomic_pair_ptr->store_var.var.store(1);
         atomic_pair_ptr->load_var.var.store(1);
-        assert(qrius::test_alignment(*atomic_pair_ptr, std::max(qrius::cacheline_size, alignof(T))));
-        assert(qrius::test_alignment(atomic_pair_ptr->store_var, std::max(qrius::cacheline_size, alignof(T))));
-        assert(qrius::test_alignment(atomic_pair_ptr->load_var, std::max(qrius::cacheline_size, alignof(T))));
+        assert(qrius::test_cacheline_align(*atomic_pair_ptr));
+        assert(qrius::test_cacheline_align(atomic_pair_ptr->store_var));
+        assert(qrius::test_cacheline_align(atomic_pair_ptr->load_var));
         static_assert(sizeof(AtomicPair<T>) == 2*qrius::cacheline_size);
         static_assert(alignof(AtomicPair<T>) == qrius::cacheline_size);
         return atomic_pair_ptr;
@@ -459,7 +459,7 @@ void perf_test_seqlock_ringbuff(qrius::CpuSet const& cpu_set, std::size_t test_i
     auto construct_func = []()
     {
         auto ringbuff_ptr = std::make_unique<MCRingBuff>();
-        assert(qrius::test_alignment(*ringbuff_ptr, std::max(qrius::cacheline_size, alignof(T))));
+        assert(qrius::test_cacheline_align(*ringbuff_ptr));
         return ringbuff_ptr;
     };
     auto emplace_func = [](auto& ring_buff,

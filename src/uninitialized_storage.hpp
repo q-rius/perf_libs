@@ -1,6 +1,8 @@
 #ifndef QRIUS_INCLUDE_GUARD_UNINITIALIZED_STORAGE_HPP
 #define QRIUS_INCLUDE_GUARD_UNINITIALIZED_STORAGE_HPP
 
+#include "perf_utils.hpp"
+
 #include <cstddef>
 #include <type_traits>
 #include <memory>
@@ -25,14 +27,10 @@ class UninitializedStorage
 public:
     constexpr UninitializedStorage() noexcept
     {
-        assert(test_alignment(storage[0], std::max(alignof(T), cacheline_size)));
+        assert(test_alignment(storage[0], cacheline_align<T>));
         if constexpr(force_page_fault_at_init)
         {
-            for(auto i=0UL; i<sizeof(storage); i+=page_size)
-            {
-                storage[i] = std::byte{'\0'};
-            }
-            storage[sizeof(storage)-1] = std::byte{'\0'};
+            force_page_fault(storage, sizeof(storage));
         }
     }
     T& operator [] (std::size_t at) noexcept
