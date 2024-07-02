@@ -8,7 +8,7 @@
 #include <bit>
 #include <iostream>
 #include <array>
-
+#include <cstring>
 #include <sys/mman.h>
 #include <sched.h>
 #include <unistd.h>
@@ -71,9 +71,66 @@ inline constexpr bool test_alignment(auto const& value, std::size_t alignment) n
     return std::bit_cast<const std::uintptr_t>(std::addressof(value)) % alignment == 0UL;
 }
 
+inline constexpr bool test_alignment_ptr(auto* ptr, std::size_t alignment) noexcept
+{
+    assert(ptr && "Likely a bug, attempting to test alignment of nullptr");
+    return std::bit_cast<const std::uintptr_t>(ptr) % alignment == 0UL;
+}
+
 inline constexpr bool test_cacheline_align(auto const& value) noexcept
 {
     return std::bit_cast<const std::uintptr_t>(std::addressof(value)) % cacheline_size == 0UL;
+}
+///
+/// Constructs T with args on memory allocated with huge pages.
+///
+/// @brief
+/// @tparam T type being constructed on the huge pages
+/// @param ...args for T's construction
+/// @return  std::unique_ptr to T created on huge pages.
+///
+/// throws std::bad_alloc if huge pages can't be allocated or T's alignment can't be respected.
+/// strong exception safety if the corresponding constructor of T throws.
+///
+template<typename T>
+std::unique_ptr<T, void (*)(T*)>  make_unique_on_huge_pages(auto&&... args)
+{
+    auto *addr = mmap(nullptr,
+                      sizeof(T),
+                      PROT_READ|PROT_WRITE,
+                      MAP_PRIVATE|MAP_ANONYMOUS|MAP_HUGETLB|MAP_LOCKED|MAP_POPULATE,
+                      0,
+                      0);
+    if(!addr ||
+       reinterpret_cast<std::uintptr_t>(addr) == std::numeric_limits<std::uintptr_t>::max())
+    {
+#ifndef NDEBUG
+        std::cerr << "Can't allocate huge page " << std::strerror(errno) << '\n';
+#endif
+        throw std::bad_alloc{};
+    }
+    if(!test_alignment_ptr(addr, alignof(T)))
+    {
+#ifndef NDEBUG
+        std::cerr << "Can't allocate huge page "
+                  << addr
+                  << " with the desired alignment "
+                  << alignof(T)
+                  << '\n';
+#endif
+        throw std::bad_alloc{};
+    }
+    try
+    {
+        return std::unique_ptr<T, void (*)(T*)>(new (addr) T(std::forward<decltype(args)>(args)...),
+                                                [](T* ptr) { munmap(ptr, sizeof(T));});
+    }
+    catch(...) // or else place the addr in a scope_guard.
+    {
+        munmap(addr, sizeof(T)); // reclaim if T's constructor throws
+        throw;
+    }
+   unreachable();
 }
 
 constexpr inline auto max_cpus = 128UL;
