@@ -426,6 +426,55 @@ static void non_blocking_ringbuff_test()
     }
 }
 
+///
+/// throws if the host doesn't have adequate number of huge pages enabled
+///
+void huge_page_alloc_test()
+{
+    {
+        auto& seq_lock = *qrius::make_unique_on_huge_pages<qrius::Seqlock<int>>();
+        seq_lock.emplace(0, 42);
+        assert((seq_lock.read() == std::pair{42, 0UL}));
+    }
+    {
+        struct Data
+        {
+            std::uint64_t a{0};
+            std::uint64_t b{0};
+            std::uint64_t c{0};
+            bool operator == (Data const& rhs) const = default;
+        };
+        using MCRingBuff = qrius::RingBuff<Data, 1, 1024, false>;
+        MCRingBuff& rb = *qrius::make_unique_on_huge_pages<MCRingBuff>();
+        {
+            auto& writer = rb.get_writer();
+            auto slots = writer.acquire<MCRingBuff::capacity>();
+            assert(slots == MCRingBuff::capacity);
+            for(auto slot=0UL; slot != slots; ++slot)
+            {
+                writer.emplace(slot, slot, slot);
+            }
+            writer.commit();
+            assert(writer.acquire() == 0); // Can't write anymore untill all readers have progressed
+        }
+        {
+            auto& reader = rb.get_reader(0);
+            auto slots = reader.acquire<MCRingBuff::capacity>();
+            assert(slots == MCRingBuff::capacity);
+            for(auto slot=0UL; slot != slots; ++slot)
+            {
+                auto [a, b, c]= reader.read();
+                assert(a == slot);
+                assert(b == slot);
+                assert(c == slot);
+                reader.pop();
+            }
+            reader.commit();
+            assert(reader.acquire() == 0);
+        }
+    }
+}
+
 int main()
 {
     perf_utils_test();
@@ -444,5 +493,7 @@ int main()
     concurrent_non_blocking_ringbuff_test();
     concurrent_non_blocking_ringbuff_test<100>(1000UL);
     concurrent_non_blocking_ringbuff_test<10>(); // 10 readers, 10000 items on a ring buffer with 32 slots
+
+    huge_page_alloc_test();
     return 0;
 }
