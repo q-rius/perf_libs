@@ -51,8 +51,8 @@ template<typename... T>
 inline constexpr auto cacheline_padding = sizeof(std::tuple<T...>) % cacheline_size
                                                 ? cacheline_size - (sizeof(std::tuple<T...>) % cacheline_size)
                                                 : 0UL;
-template<typename T>
-using CachelinePadd = std::byte[cacheline_padding<T>];
+template<typename... T>
+using CachelinePadd = std::byte[cacheline_padding<T...>];
 
 [[noreturn]] inline void unreachable()
 {
