@@ -11,7 +11,7 @@
 #include <random>
 #include <barrier>
 
-static void perf_utils_test() noexcept
+static constexpr void perf_utils_test() noexcept
 {
     {
         static_assert(alignof(int) == 4);
@@ -34,8 +34,24 @@ static void perf_utils_test() noexcept
             int&    b;
             double  c;
             int     d;
+            char    e;
         };
-        static_assert(qrius::cacheline_padding<char&, int&, double, int> == qrius::cacheline_size - sizeof(Data));
+        static_assert(qrius::cacheline_padding<char&, int&, double, int, char> == qrius::cacheline_size - sizeof(Data));
+        static_assert(sizeof(qrius::CachelinePadd<char&, int&, double, int, char>) == qrius::cacheline_size - sizeof(Data));
+        {
+            struct PaddedData : Data
+            {
+                qrius::CachelinePadd<char&, int&, double, int, char> padd{};
+            };
+            static_assert(sizeof(PaddedData) == qrius::cacheline_size);
+        }
+        {
+            struct PaddedData : Data
+            {
+                qrius::CachelinePadd<Data> padd{};
+            };
+            static_assert(sizeof(PaddedData) == qrius::cacheline_size);
+        }
     }
 }
 

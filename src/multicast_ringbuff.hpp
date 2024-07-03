@@ -31,7 +31,6 @@ class RingBuff;
 /// Each built for different usecases and are benchmarked to perform better than most implementations
 /// that were tested.
 ///
-
 /// A single writer multiple reader ringbuffer.
 /// This is a multicast ringbuffer i.e. every message is effectively a broadcast to every reader.
 /// Not the same usecase as load balancing where no reader reads the same message.
@@ -44,21 +43,21 @@ class RingBuff;
 /// Each entry in the ringbuffer is protected by a seqlock which leads to certain interesting properties
 /// that makes it a unique fit for certain usecases.
 ///
-/// Writer never blocks here. Not even if you want it to.
-/// If the writer laps the reader, reader will LOSE all data up to the current point and
-/// will start picking up where the writer is currently.
+/// Writer never blocks here even if we want it to.
+/// If the writer laps the reader, reader will lose all data up to the current point.
+/// Reader will always start picking up from where the writer is currently - when readers gets lapped.
 /// This leads to data loss for very slow readers that can't keep up with writer.
 /// This is by design and works well for the usecase where a slow reader should not slow
 /// down/block the writer and/or other faster readers.
 ///
 /// If the usecase is for the writer to block to prevent lapping the slowest reader, try the
-/// next implementation which optionally allows writer to wait until readers are caught up.
+/// next implementation which blocks writer until readers are caught up.
 ///
-/// This may be ok for usecases with a few fast readers along with a slower reader which might be
-/// ok to lose messages if it cannot keep up.
+/// This may be ok for usecases with a few fast readers along with one or more slower
+/// readers that are allowed to lose messages.
 ///
-/// Here readers might lose the older data (that might be stale anyways) while in the
-/// regular ringbuffer (like the alternate one below) readers will be forced to lose the
+/// Here readers might lose the older data (that might be stale anyways) while a
+/// regular ringbuffer (like the alternate one below) slow reader may have to lose the
 /// recent data.
 /// For e.g. Handling high throughput real time market data from financial exchanges.
 /// Losing older data might be preferable compared to the recent data.
@@ -66,7 +65,6 @@ class RingBuff;
 /// Scales well to more readers with very less impact to the writer performance.
 /// reader_count is the maximum readers to be supported but readers can join
 /// in anytime.
-///
 /// A slow reader doesn't impact the writer hence doesn't impact the other readers.
 ///
 /// T must satisfy the constraints enforced by Seqlock<T>
@@ -213,50 +211,56 @@ void read_all(typename RingBuff::Reader& reader, Func&& func)
 /// across consumers.
 /// Writer will block if the slowest consumer isn't making progress 'fast enough'.
 /// Perf tested for high throughput.
-///
-/// No latency benchmarks yet. Theoretically this should be as fast as it gets.
+/// Theoretically this is likely to be as fast as it gets.
 /// If the intention is to minimize variance of the latency distribution,
-/// you might still want to benchmark before using this.
+/// a user may still perform latency specific benchmarks before using this.
 ///
-/// You may use it as single producer single consumer queue by setting readers = 1.
+/// This may be used as a single producer single consumer queue by setting readers = 1.
 /// This is still much faster than other SPSC Queues that were part of the
 /// benchmarks.
-/// No locks, rmw operations.
+/// No locks or rmw operations.
 /// Also minimizes the number of access to the shared cacheline between reader and writer.
 /// This makes a huge difference to the throughput compared to say folly or boost spsc queues.
-
-/// Note this may not scale well in terms of throughput if consumer count increases especially
-/// for small ringbuffer sizes, since writer has to snoop the cachelines of all readers.
+///
+/// Note this may not scale well (in terms of throughput) if reader count increases especially
+/// for small ringbuffer sizes or when there are slower readers, since writer has to snoop
+/// the cachelines of all readers when it gets caught up to the prior snoop.
 /// This only happens when writer laps the smallest of the previously snooped positions
 /// of the readers.
-///
 /// Larger the ringbuffer better the writer scales.
+///
+/// Seqlock based ringbuffer above has much better reader-count-scaling characteristics.
 ///
 /// API supports batching of the reads and writes.
 /// Batching may significantly improve the writer throughput.
-/// For e.g. if you receive a burst of traffic over network, you may have
-/// more than one message ready to write at a time, you may use writer batching
-/// at that point providing significant improvement in throughput and latency.
+/// For e.g. On receiving a burst of traffic over network, there may be more than one
+/// message ready to write at a time. Here, writer batching would provide significant improvements
+/// in throughput and latency rather writing one message at a time.
 /// More details in the Reader and Writer classes.
 ///
 /// Even with no batching the performance measured is significantly higher than other
 /// candidates that were benchmarked.
 ///
 /// If reader count is greater than 1, this implementation destroys the elements only
-/// in the writer thread, when lapping since we don't ref count the readers to prevent r-m-w operations.
-/// This can be a big disadvantage if we need to release resources that are in T in a 'realtime' fashion
+/// in the writer thread when lapping. This is so that we don't have to ref count the readers
+/// to prevent rmw operations.
+/// This may not be ideal if it's important to release resources that are in T in a 'realtime' fashion
 /// For e.g. T owns an fd that needs to released after all readers are done with it (a poor example but conveys the point).
 ///
 /// Note T can not be a C array. Use std::array instead.
 /// For the same reasons why std::vector doesn't support C array.
 /// Fix https://cplusplus.github.io/LWG/issue3436 discussed here.
 ///
-/// The implementation uses value semantics. The idea is to use this from shared memory
-/// directly after an mmap with zero copy semantics in future.
+/// T doesn't have to be Trivially Constructible unlike the ringbuffer based on seqlocks.
+//
+/// The implementation uses value semantics.
+/// The idea is to use this from shared memory directly after an mmap with
+/// zero copy semantics in future. I inted to work on this implementation as time permits.
 /// C++20 onwards provides various capabilities to bring an object into existence
-/// via implicit object creation, std::launder, std::start_lifetime_as etc.
-/// So to have well defined behavior T must have at least one trivial constructor and
-/// must be trivially destructible (though these requirements are not enforced currently).
+/// via implicit object creation, std::launder, std::start_lifetime_as etc. without disrupting
+/// strict aliasing rules. To have well defined behavior in such a scenario, T must have
+//  at least one trivial constructor and must be trivially destructible -
+/// though these requirements are not required in this implementation.
 ///
 /// From reading more resources/references for comparison online, in theory, this is a multicast
 /// ringbuffer equivalent to a special case of disruptor pattern where One producer is
@@ -284,15 +288,19 @@ public:
 
     ///
     /// Sample usage of the batched writer.
+    /// This is the typical workload of the writer thread.
     ///
     /// auto &writer = ringbuf.get_writer();
-    /// auto slots = writer.acquire(); // User may spin, block or do other useful work untill slots becomes non-zero
+    /// auto slots = writer.acquire<max_slots>(); // Acquires up to max_slots as available from the ringbuffer.
+    ///                                           // User may spin, block or do other useful work untill slots becomes non-zero.
     /// for(auto i=0UL; i!= slots; ++i)
-    ///     writer.emplace(); // Create your object on all slots thus acquired.
-    ///                       // Emplacing on more slots will break the ringbuffer
-    ///                       // Emplacing on less slots is fine but commit() will only
-    /// commit as many slots that were emplaced.
-    /// writer.commit(); // acquire emplace commit has to happen in this order.
+    ///     writer.emplace(args...); // Create the objects on all slots thus acquired.
+    ///                              // Emplacing on more slots will break the ringbuffer
+    ///                              // Emplacing on less slots is fine but commit() will only
+    /// writer.commit();             // commit as many slots that were emplaced.
+    //                               // acquire -> emplace -> commit has to happen in this order.
+    ///                              // For strong exception safety, commit also must be invoked if emplace
+    ///                              // throws (i.e. if T's relevant constructor throws).
     ///
     class Writer
     {
@@ -315,7 +323,9 @@ public:
         /// Constructor of T doesn't throw
         ///
         constexpr bool write(auto&&... args) noexcept(std::is_nothrow_constructible_v<T, decltype(args)...>)
-                    requires(reader_count==1UL  || std::is_nothrow_constructible_v<T, decltype(args)...>)
+                    requires(reader_count==1UL  ||                  // Can't provide strong exception safety if atleast one of these is not true.
+                             std::is_trivially_destructible_v<T> ||
+                             std::is_nothrow_constructible_v<T, decltype(args)...>)
         {
             auto seqno = committed_seqno.load(std::memory_order_relaxed);
             if(seqno == cached_reader_seqno + capacity) [[unlikely]]
@@ -353,13 +363,14 @@ public:
         {
             if(in_progress_seqno == cached_reader_seqno + capacity) [[unlikely]] //: No improvement noted and may worsen performance when a reader isn't keeping up
             {
-                cached_reader_seqno = ringbuff.snoop_readers(); // This is where one slower reader may impact the writer badly.
+                cached_reader_seqno = ringbuff.snoop_readers(); // This is where one slower reader may impact the writer performance.
             }
             return std::min(cached_reader_seqno + capacity - in_progress_seqno, max_slots);
         }
 
         ///
         /// emplace on the acquired slots only.
+        /// i.e. acquire() must return non-zero slots for this function to be invoked.
         /// if reader_count >1, this may invoke the destructor on the prior entry if there was one (i.e. we lapped the ringbuffer)
         ///
         /// So in this implementation, for multiple readers, the construction and destruction takes place in the writer.
@@ -367,9 +378,12 @@ public:
         /// We may need atomic refcounting for such a scenario which defeats our performance goals.
         ///
         /// Provides strong exception safety guarantee.
+        /// If reader_count > 1, relevant constructor of T cannot throw to provide strong exception safety.
         ///
         constexpr void emplace(auto &&... args) noexcept (std::is_nothrow_constructible_v<T, decltype(args)...>)
-                    requires(reader_count==1UL  || std::is_nothrow_constructible_v<T, decltype(args)...>)
+                    requires(reader_count==1UL || // Can't provide strong exception safety if at least one of these are not true.
+                             std::is_trivially_destructible_v<T> ||
+                             std::is_nothrow_constructible_v<T, decltype(args)...>)
         {
             //
             // if reader_count > 1, we can only destroy in the writer thread
@@ -393,6 +407,11 @@ public:
 
         ///
         /// commit() after writing (emplacing) to all slots acquire()-d.
+        ///
+        /// For strong exception safety, make sure to invoke commit if
+        /// emplace throws (in case T has a throwing constructor) -
+        /// to make sure that previous objects written using prior emplace-s
+        /// will be recorded into the ringbuffer.
         ///
         constexpr void commit() noexcept
         {
@@ -464,11 +483,7 @@ public:
 
         ///
         /// non-mutable read.
-        /// Must invoke pop after completing the read.
-        ///
-        /// Mutable version of this can be provided if there is a usecase like
-        /// in disruptor pattern where parts of T is modified independently by
-        /// different readers.
+        /// Must invoke pop to finally mark the read transaction as complete.
         ///
         constexpr T const& read() const noexcept
         {
