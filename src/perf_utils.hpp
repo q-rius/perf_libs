@@ -25,17 +25,19 @@ template<typename T>
 inline constexpr std::size_t cacheline_align = std::max(cacheline_size, alignof(T));
 
 ///
-/// Helper for cacheline_padding in bytes for a series of fields that
+/// Just a helper for cacheline_padding in bytes for a series of fields that
 /// needs to be grouped together in cachelines inside a struct or class.
+/// Note there may be complex struct layouts where this may not work.
+///
 /// struct Foo
 /// {
 ///     int a;
 ///     int& b;
 ///     char c;
-///     std::byte padding[instead_of_calculating_yourself];
+///     std::byte padding[calculating_manually_is_error_pronce_due_to_padding_between_the_fields];
 /// };
 ///
-/// use
+/// instead use
 ///
 /// struct Foo
 /// {
@@ -44,7 +46,14 @@ inline constexpr std::size_t cacheline_align = std::max(cacheline_size, alignof(
 ///     char c;
 ///     CachelinePadd<int, int&, char> padd{}; // a, b, c will stay in the cacheline assuming Foo is at least aligned to cacheline.
 /// };
-/// Assumes std::tuple generates the same memory layout as a struct with members defined in the same level (non-nested).
+///
+/// or
+///
+/// struct Foo : FooBase
+/// {
+///    CachelinePadd<FooBase> padd{};
+/// };
+/// Assumes std::tuple generates the same memory layout as a struct with members defined in the same level (non-nested/non-composed).
 ///
 
 template<typename... T>
@@ -91,6 +100,17 @@ inline constexpr bool test_cacheline_align(auto const& value) noexcept
 ///
 /// throws std::bad_alloc if huge pages can't be allocated or T's alignment can't be respected.
 /// strong exception safety if the corresponding constructor of T throws.
+///
+/// One line to allocate ringbuffer on huge pages without injecting Allocator
+/// dependency into the type being constructed.
+/// (& stays away from the painful Allocator type related complications).
+///
+/// using MCRingBuff = qrius::RingBuff<Data, 1, 1024, false>;
+/// auto rb_ptr = qrius::make_unique_on_huge_pages<MCRingBuff>();
+///
+/// Since these are specifically designed as value types the
+/// entire object resides on huge pages.
+/// Same idea can be extended to Shared Memory too (WIP).
 ///
 template<typename T>
 std::unique_ptr<T, void (*)(T*)>  make_unique_on_huge_pages(auto&&... args)
