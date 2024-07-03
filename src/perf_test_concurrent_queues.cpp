@@ -451,16 +451,31 @@ void perf_test_qrius_seqlock(qrius::CpuSet const& cpu_set, std::size_t test_iter
                                         readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
 }
 
-template<typename T, std::size_t capacity, std::size_t readers=1UL>
+template<typename T, bool huge_pages>
+auto make_helper(auto&&... args)
+{
+    if constexpr(huge_pages)
+    {
+        auto t_ptr = qrius::make_unique_on_huge_pages<T>(std::forward<decltype(args)>(args)...);
+        assert(qrius::test_cacheline_align(*t_ptr));
+        return t_ptr;
+    }
+    else
+    {
+        auto t_ptr = std::make_unique<T>(std::forward<decltype(args)>(args)...);
+        assert(qrius::test_cacheline_align(*t_ptr));
+        return t_ptr;
+    }
+}
+
+template<typename T, std::size_t capacity, std::size_t readers=1UL, bool huge_pages=false>
 void perf_test_seqlock_ringbuff(qrius::CpuSet const& cpu_set, std::size_t test_iters) requires(std::is_constructible_v<T, std::size_t>)
 {
     std::cout << "\nseqlock ringbuff test_iterations=" << test_iters << '\n';
     using MCRingBuff = qrius::RingBuff<T, !readers ? 1UL : readers, capacity, true>;
     auto construct_func = []()
     {
-        auto ringbuff_ptr = std::make_unique<MCRingBuff>();
-        assert(qrius::test_cacheline_align(*ringbuff_ptr));
-        return ringbuff_ptr;
+        return make_helper<MCRingBuff, huge_pages>();
     };
     auto emplace_func = [](auto& ring_buff,
                            std::size_t test_iters) __attribute__((noinline, hot))
@@ -620,7 +635,8 @@ template<typename T,
          std::size_t capacity,
          std::size_t readers=1UL,
          std::size_t write_batch=1UL,
-         std::size_t read_batch=1UL>
+         std::size_t read_batch=1UL,
+         bool        huge_pages = false>
 void perf_test_qrius_blocking_ringbuff(qrius::CpuSet const& cpu_set,
                                        std::size_t test_iters) requires(std::is_constructible_v<T, std::size_t>)
 {
@@ -637,8 +653,7 @@ void perf_test_qrius_blocking_ringbuff(qrius::CpuSet const& cpu_set,
     using MCRingBuff = qrius::RingBuff<T, !readers ? 1UL : readers, capacity, false>;
     auto construct_func = []()
     {
-        auto ring_buff_ptr = std::make_unique<MCRingBuff>();
-        assert(test_cacheline_align(*ring_buff_ptr));
+        auto ring_buff_ptr = make_helper<MCRingBuff, huge_pages>();
         assert(test_cacheline_align(ring_buff_ptr->get_writer()));
         assert(test_cacheline_align(ring_buff_ptr->get_reader(0UL)));
         return ring_buff_ptr;
@@ -981,7 +996,7 @@ int main(int argc, char** argv)
         switch(data_type)
         {
             case StoredData::aligned_small:
-                perf_test_seqlock_ringbuff<CacheAlignedData, capacity>(cpu_set, test_iters);
+                perf_test_seqlock_ringbuff<CacheAlignedData, capacity, 1>(cpu_set, test_iters);
                 break;
             case StoredData::large:
                 perf_test_seqlock_ringbuff<MarketData, capacity>(cpu_set, test_iters);
@@ -999,6 +1014,9 @@ int main(int argc, char** argv)
                         break;
                     case 1:
                     default:
+#if 0
+                        perf_test_seqlock_ringbuff<std::uint64_t, capacity, 1, true>(cpu_set, test_iters); // Test with ringbuffer allocated on Huge Pages
+#endif
                         perf_test_seqlock_ringbuff<std::uint64_t, capacity>(cpu_set, test_iters);
                         break;
                     case 2:
@@ -1042,6 +1060,9 @@ int main(int argc, char** argv)
                         break;
                     case 1:
                     default:
+#if 0
+                        perf_test_qrius_blocking_ringbuff<std::uint64_t, capacity, 1, 1, 1, true>(cpu_set, test_iters); // Test with ringbuffer allocated on huge pages.
+#endif
                         perf_test_qrius_blocking_ringbuff<std::uint64_t, capacity>(cpu_set, test_iters);
                         break;
                     case 2:
