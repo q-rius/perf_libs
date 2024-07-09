@@ -1,19 +1,18 @@
 #include "multicast_ringbuff.hpp"
 #include "perf_utils.hpp"
+#include "perf_test.hpp"
 #include "external_for_bench/folly/ProducerConsumerQueue.h"
 #include "external_for_bench/rigtorp/SPSCQueue.h"
 
 #include <atomic>
-#include <future>
-#include <barrier>
 #include <limits>
-#include <thread>
 #include <type_traits>
 #include <vector>
 #include <stdexcept>
 #include <random>
 #include <concepts>
 
+using namespace qrius;
 struct InvalidReadException: std::runtime_error
 {
     using std::runtime_error::runtime_error;
@@ -22,7 +21,7 @@ struct InvalidReadException: std::runtime_error
 ///
 /// Here we attempt a comprehensive set of throughput tests for data structures
 /// that are shared across threads - writer vs readers.
-/// All tests have been performed on x86_64.
+/// All tests have been performed on Linux x86_64.
 /// 1. Simple local load, store of std::uint64_t - to see the memory parallelism in action.
 /// 2. Shared load, store of std::uint64_t
 /// 3. Seqlock - single writer multiple readers
@@ -30,218 +29,6 @@ struct InvalidReadException: std::runtime_error
 /// 5. Our performance optimized Multicast RingBuffer where writer can wait for readers to catch up.
 /// 6. Compare Known fast implementations of Single Producer Single Consumer Ringbuffers- refer external_for_bench/ directory.
 ///
-/// @brief 
-/// @tparam ConstructFunc Constructs the data structure being performance tested in the writer thread (numa aware allocation).
-/// @tparam EmplaceFunc Creates/Writes all test data to the shared data structure being performance tested.
-/// @tparam ReadFunc Reads all data being written to by writer thread - invoked in each reader threads
-/// @tparam reader_count Number of readers/reader threads to be created/tested.
-/// @param cpu_set cpu set to which writer + reader threads need to be glued to (affinity).
-/// @param construct_func
-/// @param emplace_func 
-/// @param read_func 
-/// @param test_iters Number of items to produced and read. 
-/// @return Returns the final throughput details of each test.
-///
-/// Reader/s cursor/s must reach the last element produced by writer for the tests to finish.
-/// Throughput of the writer, reader, both combined and wasted operations are reported for each test.
-///
-template<typename ConstructFunc,
-         typename EmplaceFunc,
-         typename ReadFunc,
-         std::size_t reader_count=1,
-         std::size_t stack_prefault=(1UL<<16)>
-std::array<qrius::TestResult, reader_count+1>
-    perf_test(qrius::CpuSet const& cpu_set,
-              ConstructFunc construct_func,
-              EmplaceFunc emplace_func,
-              ReadFunc read_func,
-              std::size_t test_iters)
-{
-    using namespace std::chrono_literals;
-
-    std::array<qrius::TestResult, reader_count+1> result;
-    {
-        using MultiCastQueue = typename std::decay_t<std::invoke_result_t<ConstructFunc>>::element_type; // ConstructFunc returns a unique_ptr to MultiCastQueue being tested
-        std::vector<std::promise<MultiCastQueue&>> promises(reader_count);
-        std::vector<std::future<MultiCastQueue&>> futures;
-        for(auto& prom : promises) futures.emplace_back(prom.get_future());
-
-        std::barrier start_barrier(reader_count + 1);
-        std::barrier end_barrier(reader_count + 1);
-        std::jthread producer(
-            [&]()
-            {
-                qrius::force_page_fault_stack<stack_prefault>();
-                auto core_id = qrius::nth_set_bit(cpu_set, 1UL);
-#ifndef NDEBUG
-                std::cout << "starting writer   target = "
-                          << test_iters
-                          << ", core_affinity = "
-                          << core_id
-                          << '\n';
-#endif
-                if(!qrius::set_curr_thread_affinity(core_id))
-                {
-                    std::cerr << "Failed to set affinity of the producer thread to the core " << core_id << '\n';
-                }
-                // Construct the data structure being tested in the writer thread for numa friendly allocaiton.
-                // Instead of the thread that sets up the test.
-                auto mc_queue_ptr = construct_func();
-                auto &mc_queue = *mc_queue_ptr;
-
-                // Hand over the data structure being tested to all readers.
-                for(auto& prom : promises)
-                {
-                    prom.set_value(mc_queue);
-                }
-
-                start_barrier.arrive_and_wait(); // May not be exception safe - might indefinitely wait if one of the threads throw or exit unexpectedly
-
-                std::atomic_thread_fence(std::memory_order_seq_cst); // Above barrier might be enough.
-                auto writer_start_ts = std::chrono::steady_clock::now();
-
-                std::atomic_signal_fence(std::memory_order_seq_cst); // make sure compiler doesn't reorder
-                auto [write_count, wasted_ops] = emplace_func(mc_queue, test_iters);
-                std::atomic_signal_fence(std::memory_order_seq_cst);
-
-                auto writer_end_ts = std::chrono::steady_clock::now();
-                std::atomic_thread_fence(std::memory_order_seq_cst); // Serialize instructions
-
-                result[0] = {writer_start_ts, writer_end_ts, write_count, wasted_ops};
-                end_barrier.arrive_and_wait(); // Probably not exception safe
-            }
-        );
-        std::array<std::jthread, reader_count> reader_threads;
-        auto reader_index [[maybe_unused]]= 0UL;
-        for(auto &reader_thread : reader_threads)
-        {
-            reader_thread = std::jthread(
-                [&, reader_index]()
-                {
-                    qrius::force_page_fault_stack<stack_prefault>();
-                    auto core_id = qrius::nth_set_bit(cpu_set, reader_index + 2); // producer takes the first set cpu
-#ifndef NDEBUG
-                    std::cout << "starting reader "
-                              << reader_index
-                              << " target = "
-                              << test_iters
-                              << ", core_affinity = "
-                              << core_id
-                              << '\n';
-#endif
-                    if(!qrius::set_curr_thread_affinity(core_id))
-                    {
-                        std::cerr << "Failed to set affinity of the reader thread "
-                                  << reader_index
-                                  << " to the core "
-                                  << core_id
-                                  << '\n';
-                    }
-                    futures[reader_index].wait(); // May be timeout for exception safety from other threads exiting quickly
-                    auto& mc_queue = futures[reader_index].get();
-                    start_barrier.arrive_and_wait();
-
-                    std::atomic_thread_fence(std::memory_order_seq_cst); // Above barrier might be enough though but doesn't hurt.
-                    auto reader_start_ts = std::chrono::steady_clock::now(); // May need a fence/barrier here to prevent reordering. X86_64 assembly looks ok
-
-                    std::atomic_signal_fence(std::memory_order_seq_cst); // So that compiler doesn't reorder.
-                    auto [read_count, wasted_ops] = read_func(mc_queue, reader_index, test_iters);
-                    std::atomic_signal_fence(std::memory_order_seq_cst);
-
-                    auto reader_end_ts = std::chrono::steady_clock::now();
-                    std::atomic_thread_fence(std::memory_order_seq_cst);
-
-                    result[reader_index+1] = {reader_start_ts, reader_end_ts, read_count, wasted_ops};
-                    end_barrier.arrive_and_wait();
-                }
-            );
-            ++reader_index;
-        }
-    }
-    return result;
-}
-
-///
-/// Tagged as cold so as to not interfere/inline/optimize with the code being
-/// performance tested.
-/// Intention is to obtain an apples to apples comparison of the actual code
-/// being performance tested.
-/// Especially under aggressive optimization levels (O3) in gcc/clang
-///
-template<typename value_type, std::size_t queue_capacity=1UL, std::size_t size=2UL>
-static void analyze_result(std::array<qrius::TestResult, size> const& result) __attribute__((cold));
-
-template<typename value_type, std::size_t queue_capacity, std::size_t size>
-static void analyze_result(std::array<qrius::TestResult, size> const& result)
-{
-    constexpr auto reader_count = size - 1; // Assumption is single writer multiple readers
-    std::cout << "capacity="
-              << queue_capacity
-              << " elements, readers="
-              <<  reader_count
-              << " threads, element_size="
-              << sizeof(value_type)
-              << " bytes\n";
-
-    using namespace std::chrono_literals;
-    auto const& writer = result[0];
-    auto writer_mps = qrius::throughput(writer);
-    std::cout << "writer produced "
-            << writer.completed_ops
-            << " in "
-            << (writer.end_ts - writer.start_ts)/1ns
-            << " ns, wasted_writes= "
-            << writer.wasted_ops
-            << '\n';
-    std::cout << "  throughput="
-            << writer_mps
-            << " msgs/sec, "
-            << writer_mps * sizeof(value_type) / (1UL << 30)
-            << " GBPS, "
-            << writer_mps * sizeof(value_type) * 8 / 1'000'000'000UL
-            << " Gbps, avg_latency="
-            << latency(writer)
-            << "ns\n";
-
-    auto last_to_complete = result[0];
-    for(auto i=1UL; i!=size; ++i)
-    {
-        auto const& reader = result[i];
-        std::cout << "reader "
-                    << i-1
-                    << " read "
-                    << reader.completed_ops
-                    << " in "
-                    << (reader.end_ts - reader.start_ts)/1ns
-                    << "ns, wasted_reads= "
-                    << reader.wasted_ops
-                    << '\n';
-        auto mps = qrius::throughput(reader);
-        std::cout << "  throughput="
-                  << mps
-                  << " msgs/sec, "
-                  << mps * sizeof(value_type) / (1UL << 30)
-                  << " GBPS, "
-                  << mps * sizeof(value_type) * 8 / 1'000'000'000UL
-                  << " Gbps, avg_latency="
-                  << latency(reader)
-                  <<"ns\n";
-        std::cout << "  started "
-                  << (reader.start_ts - writer.start_ts)/1ns
-                  << "ns after writer\n";
-        if(last_to_complete.end_ts < reader.end_ts)    last_to_complete = reader;
-    }
-    auto effective_mps = static_cast<double>(last_to_complete.completed_ops)/((last_to_complete.end_ts - writer.start_ts)/1ns) * 1'000'000'000UL;
-    std::cout << "effective system throughput="
-              << effective_mps
-              << " msg/sec, "
-              << effective_mps * sizeof(value_type) / (1UL << 30)
-              << " GBPS, "
-              << effective_mps * sizeof(value_type) * 8 / 1'000'000'000UL
-              << " Gbps, avg_latency="
-              << 1'000'000'000UL/effective_mps
-              << "ns (influenced by latency to start reader threads & scheduling etc.)\n";
-}
 
 template<typename T> requires (std::atomic<T>::is_always_lock_free)
 struct AtomicVar
@@ -293,12 +80,10 @@ void perf_test_local_store_load(qrius::CpuSet const& cpu_set, std::size_t test_i
         }
         return std::pair{test_iters, 0UL};
     };
-    analyze_result<T,
-                   1UL,
-                   readers+1>(perf_test<decltype(construct_func),
-                                        decltype(emplace_func),
-                                        decltype(read_func),
-                                        readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+    analyze_result<T, 1UL, readers+1>(perf_test<decltype(construct_func),
+                                                decltype(emplace_func),
+                                                decltype(read_func),
+                                                readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
 }
 
 template<typename T, auto readers=1UL>
@@ -604,7 +389,7 @@ void perf_test_shared_region_seqno(qrius::CpuSet const& cpu_set,
         {
            shared_region.elements[item] = item;
            shared_region.seqno.store(item + 1, std::memory_order_release);
-           //asm("SFENCE"); // This seems to exactly reproduce the performance regression in multicast ringbuffer
+           //asm("SFENCE"); // This seems to reproduce the performance regression in multicast ringbuffer on Alder Lake.
         }
         return std::pair{test_iters, 0UL};
     };
@@ -709,7 +494,7 @@ void perf_test_qrius_blocking_ringbuff(qrius::CpuSet const& cpu_set,
             while(!(slots = reader.template acquire<read_batch>()))
             {
                 ++wasted_ops;
-                asm("pause"); // yielding here improves writer throughput since from reduction in cache coherency protocol traffic on the writer seqno cacheline.
+                asm("pause");
             }
             for(auto slot=0UL; slot != slots; ++slot)
             {
@@ -904,7 +689,8 @@ Capacity to_capacity(std::string_view capacity_arg) noexcept
 }
 
 ///
-/// TODO: Clean up and simplify the who argument parsing and various options
+/// TODO: Clean up and simplify the whole argument parsing and various options
+///
 std::tuple<TestType, StoredData, Capacity, std::size_t> parse(int argc, char** argv) noexcept
 {
     auto test_type_arg      = argc > 1 ? std::string_view(argv[1]) : ""sv;

@@ -444,6 +444,7 @@ static void non_blocking_ringbuff_test()
 
 ///
 /// throws if the host doesn't have adequate number of huge pages enabled
+/// Create a few huge pages before the test is run. For ref: huge_page.sh.
 ///
 void huge_page_alloc_test()
 {
