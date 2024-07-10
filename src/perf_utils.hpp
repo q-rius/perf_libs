@@ -4,11 +4,14 @@
 #include <atomic>
 #include <cassert>
 #include <bitset>
-#include <chrono>
 #include <bit>
-#include <iostream>
 #include <array>
 #include <cstring>
+#include <cstdint>
+#include <memory>
+#include <limits>
+#include <iostream>
+
 #include <sys/mman.h>
 #include <sched.h>
 #include <unistd.h>
@@ -34,7 +37,7 @@ inline constexpr std::size_t cacheline_align = std::max(cacheline_size, alignof(
 ///     int a;
 ///     int& b;
 ///     char c;
-///     std::byte padding[calculating_manually_is_error_pronce_due_to_padding_between_the_fields];
+///     std::byte padding[calculating_manually_is_error_prone_due_to_padding_between_the_fields];
 /// };
 ///
 /// instead use
@@ -129,7 +132,7 @@ std::unique_ptr<T, void (*)(T*)>  make_unique_on_huge_pages(auto&&... args)
 #endif
         throw std::bad_alloc{};
     }
-    if(!test_alignment_ptr(addr, alignof(T)))
+    if(!test_alignment_ptr(addr, alignof(T))) // For correctness, very unlikely in practice.
     {
 #ifndef NDEBUG
         std::cerr << "Can't allocate huge page "
@@ -245,30 +248,6 @@ inline void force_page_fault_stack() noexcept
     std::byte array[bytes];
     asm volatile("" ::"m"(array) :"memory"); // Like DoNotOptimize in MicroBenches.
     force_page_fault(array, bytes);
-}
-
-
-struct TestResult
-{
-    using SteadyClockTP = std::chrono::time_point<std::chrono::steady_clock>;
-    SteadyClockTP start_ts{};
-    SteadyClockTP end_ts{};
-    std::size_t   completed_ops{0};
-    std::size_t   wasted_ops{0};
-};
-
-inline double throughput(TestResult const& result) noexcept
-{
-    assert(result.end_ts >= result.start_ts && "bad clock or timestamps");
-    using namespace std::chrono_literals;
-    return static_cast<double>(result.completed_ops)/((result.end_ts - result.start_ts)/1ns)*1'000'000'000UL;
-}
-
-inline double latency(TestResult const& result) noexcept
-{
-    assert(result.end_ts >= result.start_ts && "bad clock or timestamps");
-    using namespace std::chrono_literals;
-    return ((result.end_ts - result.start_ts)/1ns)/static_cast<double>(result.completed_ops);
 }
 
 }
