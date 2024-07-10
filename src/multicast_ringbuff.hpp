@@ -45,7 +45,7 @@ class RingBuff;
 ///
 /// Writer never blocks here even if we want it to.
 /// If the writer laps the reader, reader will lose all data up to the current point.
-/// Reader will always start picking up from where the writer is currently - when readers gets lapped.
+/// Reader will always start picking up from where the writer is currently - when readers get lapped.
 /// This leads to data loss for very slow readers that can't keep up with writer.
 /// This is by design and works well for the usecase where a slow reader should not slow
 /// down/block the writer and/or other faster readers.
@@ -266,6 +266,9 @@ void read_all(typename RingBuff::Reader& reader, Func&& func)
 /// ringbuffer equivalent to a special case of disruptor pattern where One producer is
 /// BROADCASTING data to multiple consumers (readers) i.e. each reader receives every item from the producer.
 /// https://lmax-exchange.github.io/disruptor/disruptor.html#_throughput_performance_testing
+/// This can form the basis of the disruptor's ringbuffer.
+/// Would provide same performance characteristics but with more capabilities and flexibilities.
+/// I intend to build on this to implement the disruptor based APIs (diamond style producer-consumer).
 ///
 template<typename T, std::size_t reader_count_, std::size_t capacity_>
     requires (reader_count_>0UL &&
@@ -463,8 +466,8 @@ public:
         }
 
         ///
-        /// Increase max_slots only if you have proof that reader isn't keeping up
-        /// or if you care less about writer's throughput but more about reader's latency.
+        /// Increase max_slots only if there is proof that reader isn't keeping up
+        /// or to trade-off writer's throughput with reader's latency.
         /// Otherwise reader will end up contending on writer-seqno-cacheline while spinning waiting for more data.
         /// This is a case of reader busy waiting for writer.
         /// For e.g. In the perf test increasing this to 32 while keeping writer max_slots to 1
