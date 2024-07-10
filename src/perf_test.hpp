@@ -26,25 +26,25 @@ namespace qrius
 /// Throughput of the writer, reader, both combined and wasted operations are reported for each test.
 ///
 
-template<typename ConstructFunc,
+template<std::invocable<> ConstructFunc,
          typename EmplaceFunc,
          typename ReadFunc,
          std::size_t reader_count=1,
          std::size_t stack_prefault=(1UL<<16)>
 std::array<qrius::TestResult, reader_count+1>
     perf_test(qrius::CpuSet const& cpu_set,
-              ConstructFunc construct_func,
-              EmplaceFunc emplace_func,
-              ReadFunc read_func,
+              ConstructFunc&& construct_func,
+              EmplaceFunc&& emplace_func,
+              ReadFunc&& read_func,
               std::size_t test_iters)
 {
     using namespace std::chrono_literals;
 
     std::array<qrius::TestResult, reader_count+1> result;
     {
-        using MultiCastQueue = typename std::decay_t<std::invoke_result_t<ConstructFunc>>::element_type; // ConstructFunc returns a unique_ptr to MultiCastQueue being tested
-        std::vector<std::promise<MultiCastQueue&>> promises(reader_count);
-        std::vector<std::future<MultiCastQueue&>> futures;
+        using Type = typename std::decay_t<std::invoke_result_t<ConstructFunc>>::element_type; // ConstructFunc must return a unique_ptr to shared data structure being throughput tested
+        std::vector<std::promise<Type&>> promises(reader_count);
+        std::vector<std::future<Type&>> futures;
         for(auto& prom : promises) futures.emplace_back(prom.get_future());
 
         std::barrier start_barrier(reader_count + 1);
@@ -67,13 +67,13 @@ std::array<qrius::TestResult, reader_count+1>
                 }
                 // Construct the data structure being tested in the writer thread for numa friendly allocaiton.
                 // Instead of the thread that sets up the test.
-                auto mc_queue_ptr = construct_func();
-                auto &mc_queue = *mc_queue_ptr;
+                auto data_ptr = construct_func();
+                auto &data = *data_ptr;
 
                 // Hand over the data structure being tested to all readers.
                 for(auto& prom : promises)
                 {
-                    prom.set_value(mc_queue);
+                    prom.set_value(data);
                 }
 
                 start_barrier.arrive_and_wait(); // May not be exception safe - might indefinitely wait if one of the threads throw or exit unexpectedly
@@ -82,7 +82,7 @@ std::array<qrius::TestResult, reader_count+1>
                 auto writer_start_ts = std::chrono::steady_clock::now();
 
                 std::atomic_signal_fence(std::memory_order_seq_cst); // make sure compiler doesn't reorder
-                auto [write_count, wasted_ops] = emplace_func(mc_queue, test_iters);
+                auto [write_count, wasted_ops] = emplace_func(data, test_iters);
                 std::atomic_signal_fence(std::memory_order_seq_cst);
 
                 auto writer_end_ts = std::chrono::steady_clock::now();
@@ -119,14 +119,14 @@ std::array<qrius::TestResult, reader_count+1>
                                   << '\n';
                     }
                     futures[reader_index].wait(); // May be timeout for exception safety from other threads exiting quickly
-                    auto& mc_queue = futures[reader_index].get();
+                    auto& data = futures[reader_index].get();
                     start_barrier.arrive_and_wait();
 
                     std::atomic_thread_fence(std::memory_order_seq_cst); // Above barrier might be enough though but doesn't hurt.
                     auto reader_start_ts = std::chrono::steady_clock::now(); // May need a fence/barrier here to prevent reordering. X86_64 assembly looks ok
 
                     std::atomic_signal_fence(std::memory_order_seq_cst); // So that compiler doesn't reorder.
-                    auto [read_count, wasted_ops] = read_func(mc_queue, reader_index, test_iters);
+                    auto [read_count, wasted_ops] = read_func(data, reader_index, test_iters);
                     std::atomic_signal_fence(std::memory_order_seq_cst);
 
                     auto reader_end_ts = std::chrono::steady_clock::now();

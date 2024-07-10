@@ -83,7 +83,11 @@ void perf_test_local_store_load(qrius::CpuSet const& cpu_set, std::size_t test_i
     analyze_result<T, 1UL, readers+1>(perf_test<decltype(construct_func),
                                                 decltype(emplace_func),
                                                 decltype(read_func),
-                                                readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                                readers>(cpu_set,
+                                                         std::move(construct_func),
+                                                         std::move(emplace_func),
+                                                         std::move(read_func),
+                                                         test_iters));
 }
 
 template<typename T, auto readers=1UL>
@@ -120,7 +124,11 @@ void perf_test_shared_store_load(qrius::CpuSet const& cpu_set, std::size_t test_
                    readers+1>(perf_test<decltype(construct_func),
                                         decltype(emplace_func),
                                         decltype(read_func),
-                                        readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                        readers>(cpu_set,
+                                                 std::move(construct_func),
+                                                 std::move(emplace_func),
+                                                 std::move(read_func),
+                                                 test_iters));
 }
 
 ///
@@ -172,7 +180,11 @@ void perf_test_ping_pong_store_load(qrius::CpuSet const& cpu_set, std::size_t te
     analyze_result<T>(perf_test<decltype(construct_func),
                                 decltype(emplace_func),
                                 decltype(read_func),
-                                1UL>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                1UL>(cpu_set,
+                                     std::move(construct_func),
+                                     std::move(emplace_func),
+                                     std::move(read_func),
+                                     test_iters));
 }
 
 template<typename T>
@@ -233,7 +245,11 @@ void perf_test_qrius_seqlock(qrius::CpuSet const& cpu_set, std::size_t test_iter
                    readers+1>(perf_test<decltype(construct_func),
                                         decltype(emplace_func),
                                         decltype(read_func),
-                                        readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                        readers>(cpu_set,
+                                                 std::move(construct_func),
+                                                 std::move(emplace_func),
+                                                 std::move(read_func),
+                                                 test_iters));
 }
 
 template<typename T, bool huge_pages>
@@ -300,7 +316,11 @@ void perf_test_seqlock_ringbuff(qrius::CpuSet const& cpu_set, std::size_t test_i
                    readers+1>(perf_test<decltype(construct_func),
                                         decltype(emplace_func),
                                         decltype(read_func),
-                                        readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                        readers>(cpu_set,
+                                                 std::move(construct_func),
+                                                 std::move(emplace_func),
+                                                 std::move(read_func),
+                                                 test_iters));
 }
 
 template<std::size_t capacity>
@@ -355,7 +375,11 @@ void perf_test_shared_region(qrius::CpuSet const& cpu_set, std::size_t test_iter
     analyze_result<std::size_t>(perf_test<decltype(construct_func),
                                 decltype(emplace_func),
                                 decltype(read_func),
-                                readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                readers>(cpu_set,
+                                         std::move(construct_func),
+                                         std::move(emplace_func),
+                                         std::move(read_func),
+                                         test_iters));
 }
 
 template<std::size_t capacity>
@@ -413,7 +437,11 @@ void perf_test_shared_region_seqno(qrius::CpuSet const& cpu_set,
     analyze_result<std::size_t>(perf_test<decltype(construct_func),
                                 decltype(emplace_func),
                                 decltype(read_func),
-                                readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                readers>(cpu_set,
+                                         std::move(construct_func),
+                                         std::move(emplace_func),
+                                         std::move(read_func),
+                                         test_iters));
 }
 
 template<typename T,
@@ -511,7 +539,11 @@ void perf_test_qrius_blocking_ringbuff(qrius::CpuSet const& cpu_set,
                    readers+1>(perf_test<decltype(construct_func),
                                         decltype(emplace_func),
                                         decltype(read_func),
-                                        readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                        readers>(cpu_set,
+                                                 std::move(construct_func),
+                                                 std::move(emplace_func),
+                                                 std::move(read_func),
+                                                 test_iters));
 }
 
 template<typename T, std::size_t capacity, std::size_t readers=1UL>
@@ -567,7 +599,11 @@ void perf_test_folly(qrius::CpuSet const& cpu_set, std::size_t test_iters)
                    readers+1>(perf_test<decltype(construct_func),
                                         decltype(emplace_func),
                                         decltype(read_func),
-                                        readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                        readers>(cpu_set,
+                                                 std::move(construct_func),
+                                                 std::move(emplace_func),
+                                                 std::move(read_func),
+                                                 test_iters));
 }
 
 template<typename T, std::size_t capacity, std::size_t readers=1UL>
@@ -620,7 +656,11 @@ void perf_test_rigtorp(qrius::CpuSet const& cpu_set, std::size_t test_iters)
                    readers+1>(perf_test<decltype(construct_func),
                                         decltype(emplace_func),
                                         decltype(read_func),
-                                        readers>(cpu_set, construct_func, emplace_func, read_func, test_iters));
+                                        readers>(cpu_set,
+                                                 std::move(construct_func),
+                                                 std::move(emplace_func),
+                                                 std::move(read_func),
+                                                 test_iters));
 }
 
 namespace argparse
