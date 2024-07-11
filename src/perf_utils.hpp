@@ -101,8 +101,8 @@ inline constexpr bool test_cacheline_align(auto const& value) noexcept
 /// @param ...args for T's construction
 /// @return  std::unique_ptr to T created on huge pages.
 ///
-/// throws std::bad_alloc if huge pages can't be allocated or T's alignment can't be respected.
-/// strong exception safety if the corresponding constructor of T throws.
+/// Throws std::bad_alloc if huge pages can't be allocated or T's alignment can't be respected.
+/// Provides strong exception safety if the relevant constructor of T throws.
 ///
 /// One line to allocate ringbuffer on huge pages without injecting Allocator
 /// dependency into the type being constructed.
@@ -118,21 +118,23 @@ inline constexpr bool test_cacheline_align(auto const& value) noexcept
 template<typename T>
 std::unique_ptr<T, void (*)(T*)>  make_unique_on_huge_pages(auto&&... args)
 {
-    auto *addr = mmap(nullptr,
-                      sizeof(T),
-                      PROT_READ|PROT_WRITE,
-                      MAP_PRIVATE|MAP_ANONYMOUS|MAP_HUGETLB|MAP_LOCKED|MAP_POPULATE,
-                      0,
-                      0);
+    using UniquePtr = std::unique_ptr<void, void(*)(void*)>;
+    UniquePtr addr{mmap(nullptr,
+                        sizeof(T),
+                        PROT_READ|PROT_WRITE,
+                        MAP_PRIVATE|MAP_ANONYMOUS|MAP_HUGETLB|MAP_LOCKED|MAP_POPULATE,
+                        0,
+                        0),
+                    [](void* ptr){ munmap(ptr, sizeof(T)); }};
     if(!addr ||
-       reinterpret_cast<std::uintptr_t>(addr) == std::numeric_limits<std::uintptr_t>::max())
+       reinterpret_cast<std::uintptr_t>(addr.get()) == std::numeric_limits<std::uintptr_t>::max())
     {
 #ifndef NDEBUG
         std::cerr << "Can't allocate huge page " << std::strerror(errno) << '\n';
 #endif
         throw std::bad_alloc{};
     }
-    if(!test_alignment_ptr(addr, alignof(T))) // For correctness, very unlikely in practice.
+    if(!test_alignment_ptr(addr.get(), alignof(T))) // For correctness, very unlikely in practice.
     {
 #ifndef NDEBUG
         std::cerr << "Can't allocate huge page "
@@ -143,17 +145,11 @@ std::unique_ptr<T, void (*)(T*)>  make_unique_on_huge_pages(auto&&... args)
 #endif
         throw std::bad_alloc{};
     }
-    try
-    {
-        return std::unique_ptr<T, void (*)(T*)>(new (addr) T(std::forward<decltype(args)>(args)...),
-                                                [](T* ptr) { munmap(ptr, sizeof(T));});
-    }
-    catch(...) // or else place the addr in a scope_guard.
-    {
-        munmap(addr, sizeof(T)); // reclaim if T's constructor throws
-        throw;
-    }
-   unreachable();
+    // For strong exception safety if T's relevant constructor throws.
+    std::unique_ptr<T, void (*)(T*)> unique_ptr{new (addr.get()) T(std::forward<decltype(args)>(args)...),
+                                                [](T* ptr) { munmap(static_cast<void*>(ptr), sizeof(T));}};
+    addr.release();
+    return std::move(unique_ptr);
 }
 
 constexpr inline auto max_cpus = 128UL;
