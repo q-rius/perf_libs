@@ -21,14 +21,14 @@ public:
     static_assert(std::atomic<Seqno>::is_always_lock_free && "can't support fast seqlock in this architecture");
 
     ///
-    /// Writes the data with associated seqno.
+    /// Writes the data with the associated seqno.
     ///
-    /// Read will provide back the same associated seqno.
+    /// Read will later provide the same associated seqno back.
     ///
     /// Seqno which is 64 bit must be monotonically increasing.
     ///
-    /// Seqno in the context of the ringbuffer implementation that uses this,
-    /// is refers to the count of the latest item being written to the ringbuffer.
+    /// Seqno is used in the context of the ringbuffer implementation that uses this.
+    /// So it refers to the count of the latest item being written to the ringbuffer.
     ///
     /// Seqno overflow will result in undefined behavior for this implementation.
     /// This may not be as bad a limitation in practice, incrementing by 1 per cycle
