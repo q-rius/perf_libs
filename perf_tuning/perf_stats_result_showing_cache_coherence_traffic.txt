@@ -1,0 +1,228 @@
+kesav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -e l1d_pend_miss.fb_full,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues blocking_ringbuff
+
+MultiCastRingBuff test_iterations=800000000, write_batch=1, read_batch=1
+capacity=33554432 elements, readers=1 threads, element_size=8 bytes
+writer produced 800000000 in 13539421890 ns, wasted_writes= 0
+  throughput=5.90867e+07 msgs/sec, 0.44023 GBPS, 3.78155 Gbps
+reader 0 read 800000000 in 13539420795ns, wasted_reads= 17174904
+  throughput=5.90867e+07 msgs/sec, 0.44023 GBPS, 3.78155 Gbps
+  started 218ns after writer
+effective system throughput=5.90867e+07 msg/sec, 0.44023 GBPS, 3.78155 Gbps (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+        22,583,445      cpu_core/l1d_pend_miss.fb_full/                                     (66.66%)
+       463,557,736      cpu_core/l2_request.all/                                      (66.68%)
+       436,314,525      cpu_core/l2_request.miss/                                     (66.68%)
+       277,485,769      cpu_core/l2_rqsts.all_rfo/                                     (66.68%)
+        24,789,529      cpu_core/l2_rqsts.rfo_hit/                                     (66.66%)
+       252,771,087      cpu_core/l2_rqsts.rfo_miss/                                     (66.63%)
+
+      13.639004251 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$ 
+kesav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -e l1d_pend_miss.fb_full,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues blocking_ringbuff
+
+MultiCastRingBuff test_iterations=800000000, write_batch=1, read_batch=1
+capacity=33554432 elements, readers=1 threads, element_size=8 bytes
+writer produced 800000000 in 20413351136 ns, wasted_writes= 0
+  throughput=3.919e+07 msgs/sec, 0.291989 GBPS, 2.50816 Gbps
+reader 0 read 800000000 in 20413385423ns, wasted_reads= 18675989
+  throughput=3.919e+07 msgs/sec, 0.291988 GBPS, 2.50816 Gbps
+  started -34182ns after writer
+effective system throughput=3.919e+07 msg/sec, 0.291989 GBPS, 2.50816 Gbps (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+        22,381,554      cpu_core/l1d_pend_miss.fb_full/                                     (66.66%)
+       526,600,833      cpu_core/l2_request.all/                                      (66.66%)
+       499,630,224      cpu_core/l2_request.miss/                                     (66.66%)
+       338,484,727      cpu_core/l2_rqsts.all_rfo/                                     (66.67%)
+        23,927,753      cpu_core/l2_rqsts.rfo_hit/                                     (66.68%)
+       314,310,741      cpu_core/l2_rqsts.rfo_miss/                                     (66.67%)
+
+      20.514959196 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$
+esav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -e l1d_pend_miss.fb_full,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues blocking_ringbuff
+
+MultiCastRingBuff test_iterations=800000000, write_batch=1, read_batch=1
+capacity=33554432 elements, readers=1 threads, element_size=8 bytes
+writer produced 800000000 in 21123711584 ns, wasted_writes= 0
+  throughput=3.78721e+07 msgs/sec, 0.282169 GBPS, 2.42382 Gbps
+reader 0 read 800000000 in 21123713535ns, wasted_reads= 20005648
+  throughput=3.78721e+07 msgs/sec, 0.282169 GBPS, 2.42382 Gbps
+  started -339ns after writer
+effective system throughput=3.78721e+07 msg/sec, 0.282169 GBPS, 2.42382 Gbps (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+        23,009,207      cpu_core/l1d_pend_miss.fb_full/                                     (66.66%)
+       533,298,659      cpu_core/l2_request.all/                                      (66.67%)
+       508,375,566      cpu_core/l2_request.miss/                                     (66.68%)
+       345,844,027      cpu_core/l2_rqsts.all_rfo/                                     (66.68%)
+        22,647,639      cpu_core/l2_rqsts.rfo_hit/                                     (66.66%)
+       323,117,517      cpu_core/l2_rqsts.rfo_miss/                                     (66.64%) // THIS IS TERRIBLE very clearly from the committed seqno in the writer
+
+      21.224353390 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -e l1d_pend_miss.l2_stalls,l1d_pend_miss.fb_full,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues blocking_ringbuff
+
+MultiCastRingBuff test_iterations=800000000, write_batch=256, read_batch=1
+capacity=33554432 elements, readers=1 threads, element_size=8 bytes
+writer produced 800000048 in 1839969849 ns, wasted_writes= 0
+  throughput=4.3479e+08 msgs/sec, 3.23944 GBPS, 27.8265 Gbps
+reader 0 read 800000000 in 1840004978ns, wasted_reads= 2576067
+  throughput=4.34781e+08 msgs/sec, 3.23937 GBPS, 27.826 Gbps
+  started -35024ns after writer
+effective system throughput=4.3479e+08 msg/sec, 3.23944 GBPS, 27.8265 Gbps (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+         6,205,949      cpu_core/l1d_pend_miss.l2_stalls/                                     (56.95%)
+        21,481,678      cpu_core/l1d_pend_miss.fb_full/                                     (57.16%)
+       271,368,186      cpu_core/l2_request.all/                                      (57.36%)
+       193,025,230      cpu_core/l2_request.miss/                                     (57.38%)
+        92,271,757      cpu_core/l2_rqsts.all_rfo/                                     (57.25%)
+        80,881,198      cpu_core/l2_rqsts.rfo_hit/                                     (57.05%)
+        12,440,466      cpu_core/l2_rqsts.rfo_miss/                                     (56.84%)
+
+       1.942841506 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$ 
+esav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -e l1d_pend_miss.l2_stalls,l1d_pend_miss.fb_full,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues rigtorp
+
+
+rigtorp::SPSCQueue, test_iterations=800000000
+capacity=33554432 elements, readers=1 threads, element_size=8 bytes
+writer produced 800000000 in 17435662496 ns, wasted_writes= 0
+  throughput=4.5883e+07 msgs/sec, 0.341855 GBPS, 2.93651 Gbps
+reader 0 read 800000000 in 17435663165ns, wasted_reads= 13609692
+  throughput=4.5883e+07 msgs/sec, 0.341855 GBPS, 2.93651 Gbps
+  started -333ns after writer
+effective system throughput=4.5883e+07 msg/sec, 0.341855 GBPS, 2.93651 Gbps (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+         8,095,422      cpu_core/l1d_pend_miss.l2_stalls/                                     (57.13%)
+        41,128,057      cpu_core/l1d_pend_miss.fb_full/                                     (57.15%)
+       496,948,530      cpu_core/l2_request.all/                                      (57.15%)
+       467,102,310      cpu_core/l2_request.miss/                                     (57.15%)
+       301,952,336      cpu_core/l2_rqsts.all_rfo/                                     (57.15%)
+        27,332,257      cpu_core/l2_rqsts.rfo_hit/                                     (57.13%)
+       275,134,817      cpu_core/l2_rqsts.rfo_miss/                                     (57.13%)
+
+      17.558776442 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$ 
+
+
+kesav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -e l1d_pend_miss.l2_stalls,l1d_pend_miss.fb_full,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues seqlock_ringbuff
+
+seqlock ringbuff test_iterations=800000000
+capacity=33554432 elements, readers=1 threads, element_size=8 bytes
+writer produced 800000000 in 2393371567 ns, wasted_writes= 0
+  throughput=3.34256e+08 msgs/sec, 2.4904 GBPS, 21.3924 Gbps
+reader 0 read 397346816 in 2472186455ns, wasted_reads= 432
+  throughput=1.60727e+08 msgs/sec, 1.19751 GBPS, 10.2865 Gbps
+  started -43230ns after writer
+effective system throughput=1.6073e+08 msg/sec, 1.19753 GBPS, 10.2867 Gbps (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+         2,811,755      cpu_core/l1d_pend_miss.l2_stalls/                                     (57.16%)
+       117,551,751      cpu_core/l1d_pend_miss.fb_full/                                     (57.17%)
+       563,139,517      cpu_core/l2_request.all/                                      (57.16%)
+       401,253,240      cpu_core/l2_request.miss/                                     (57.17%)
+       171,516,251      cpu_core/l2_rqsts.all_rfo/                                     (57.12%)
+       160,167,321      cpu_core/l2_rqsts.rfo_hit/                                     (57.11%)
+        11,252,422      cpu_core/l2_rqsts.rfo_miss/                                     (57.12%) // THIS IS GREAT
+
+       2.745445878 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$ 
+kesav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -e l1d_pend_miss.l2_stalls,l1d_pend_miss.fb_full,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues shared_store_load
+
+shared atomic load store with no fences test_iterations=16000000000
+writer produced 16000000000 in 5198220821 ns, wasted_writes= 0
+  throughput=3.07798e+09 msgs/sec, 22.9327 GBPS, 196.99 Gbps
+reader 0 read 1967594023 in 5198259354ns, wasted_reads= 0
+capacity=1 elements, readers=1 threads, element_size=8 bytes
+  throughput=3.7851e+08 msgs/sec, 2.82012 GBPS, 24.2247 Gbps
+  started -38624ns after writer
+effective system throughput=3.07798e+09 msg/sec, 22.9327 GBPS, 196.99 Gbps (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+               566      cpu_core/l1d_pend_miss.l2_stalls/                                     (57.16%)
+             2,942      cpu_core/l1d_pend_miss.fb_full/                                     (57.15%)
+        35,610,455      cpu_core/l2_request.all/                                      (57.15%)
+        35,366,896      cpu_core/l2_request.miss/                                     (57.15%)
+        35,295,553      cpu_core/l2_rqsts.all_rfo/                                     (57.13%)
+               750      cpu_core/l2_rqsts.rfo_hit/                                     (57.13%)
+        35,347,271      cpu_core/l2_rqsts.rfo_miss/                                     (57.13%)
+
+       5.209377097 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$ 
+kesav@qbuntu:~/workspace/exercises$ sudo rdmsr -p 4 0x1a4                                                                                                                                                  
+f
+kesav@qbuntu:~/workspace/exercises$ sudo rdmsr -p 3 0x1a4                                                                                                                                                 
+f
+kesav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -D 100 -e l1d_pend_miss.l2_stalls,l1d_pend_miss.fb_full,l1d_pend_miss.pending_cycles,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues-fast-opt shared_region
+[sudo] password for kesav: 
+Events disabled
+
+lock free shared region test_iterations=268435456
+Events enabled
+capacity=1 elements, readers=1 threads, element_size=8 bytes
+writer produced 268435456 in 163381131 ns, wasted_writes= 0
+  throughput=1.643e+09 msgs/sec, 12.2413 GBPS, 105.152 Gbps, avg_latency=0.608642ns
+reader 0 read 268435456 in 309713349ns, wasted_reads= 144
+  throughput=8.66722e+08 msgs/sec, 6.45758 GBPS, 55.4702 Gbps, avg_latency=1.15377ns
+  started -50009ns after writer
+effective system throughput=8.66862e+08 msg/sec, 6.45863 GBPS, 55.4792 Gbps, avg_latency=1.15359ns (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+           917,321      cpu_core/l1d_pend_miss.l2_stalls/                                     (49.96%)
+     1,746,958,800      cpu_core/l1d_pend_miss.fb_full/                                     (49.95%)
+       111,717,199      cpu_core/l1d_pend_miss.pending_cycles/                                     (49.92%)
+       111,449,597      cpu_core/l2_request.all/                                      (49.92%)
+       103,328,816      cpu_core/l2_request.miss/                                     (50.04%)
+        13,594,052      cpu_core/l2_rqsts.all_rfo/                                     (50.05%)
+         4,997,073      cpu_core/l2_rqsts.rfo_hit/                                     (50.08%)
+         8,586,725      cpu_core/l2_rqsts.rfo_miss/                                     (50.08%)
+
+       1.853698345 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$
+kesav@qbuntu:~/workspace/exercises$ sudo perf stat -C 3 -D 1000 -e L1-dcache-stores,l1d_pend_miss.l2_stalls,l1d_pend_miss.fb_full,l1d_pend_miss.pending_cycles,l2_request.all,l2_request.miss,l2_rqsts.all_rfo,l2_rqsts.rfo_hit,l2_rqsts.rfo_miss ../bin/perf_test_concurrent_queues-fast-opt shared_region
+WARNING: 3 isn't a 'cpu_atom', please use a CPU list in the 'cpu_atom' range (6-13)
+Events disabled
+
+lock free shared region test_iterations=268435456
+Events enabled
+capacity=1 elements, readers=1 threads, element_size=8 bytes
+writer produced 268435456 in 161405658 ns, wasted_writes= 0
+  throughput=1.66311e+09 msgs/sec, 12.3911 GBPS, 106.439 Gbps, avg_latency=0.601283ns
+reader 0 read 268435456 in 304968579ns, wasted_reads= 286
+  throughput=8.80207e+08 msgs/sec, 6.55805 GBPS, 56.3332 Gbps, avg_latency=1.1361ns
+  started -37753ns after writer
+effective system throughput=8.80316e+08 msg/sec, 6.55886 GBPS, 56.3402 Gbps, avg_latency=1.13596ns (influenced by latency to start reader threads & scheduling etc.)
+
+ Performance counter stats for 'CPU(s) 3':
+
+       262,876,094      cpu_core/L1-dcache-stores/                                     (44.27%)
+           537,286      cpu_core/l1d_pend_miss.l2_stalls/                                     (44.26%)
+       527,828,874      cpu_core/l1d_pend_miss.fb_full/                                     (44.24%)
+        32,032,404      cpu_core/l1d_pend_miss.pending_cycles/                                     (44.42%)
+        39,414,856      cpu_core/l2_request.all/                                      (44.58%)
+        34,549,655      cpu_core/l2_request.miss/                                     (44.58%)
+         7,612,889      cpu_core/l2_rqsts.all_rfo/                                     (44.60%)
+         4,728,615      cpu_core/l2_rqsts.rfo_hit/                                     (44.62%)
+         3,002,877      cpu_core/l2_rqsts.rfo_miss/                                     (44.44%)
+
+       1.796887752 seconds time elapsed
+
+kesav@qbuntu:~/workspace/exercises$ 
