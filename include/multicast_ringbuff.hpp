@@ -112,7 +112,7 @@ public:
 
         constexpr void emplace(auto&&... args) noexcept
         {
-            data.ringbuff.seq_locks[data.ringbuff.index(data.seqno)].emplace(data.seqno, std::forward<decltype(args)>(args)...);
+            data.ringbuff.seq_locks[RingBuff::index(data.seqno)].emplace(data.seqno, std::forward<decltype(args)>(args)...);
             ++data.seqno;
         }
     private:
@@ -133,10 +133,10 @@ public:
             : data{0, &ringbuff}
         {}
 
-        constexpr bool data_available() const noexcept
+        bool data_available() const noexcept
         {
             assert(data.ringbuff);
-            return data.ringbuff->seq_locks[data.ringbuff->index(data.seqno)].read_ready(data.seqno);
+            return data.ringbuff->seq_locks[RingBuff::index(data.seqno)].read_ready(data.seqno);
         }
 
         ///
@@ -147,10 +147,10 @@ public:
         /// This mutates the reader state.
         /// i.e. updates the cursor to the next slot to read.
         ///
-        constexpr T read_data() noexcept
+        T read_data() noexcept
         {
             assert(data.ringbuff);
-            auto [result, new_seqno] = data.ringbuff->seq_locks[data.ringbuff->index(data.seqno)].read(); // T must be trivially copyable
+            auto [result, new_seqno] = data.ringbuff->seq_locks[RingBuff::index(data.seqno)].read(); // T must be trivially copyable
             assert(data.seqno <= new_seqno);
             data.seqno = new_seqno + 1;
             return result;
@@ -164,10 +164,10 @@ public:
         /// assert(actual_seqno >= expected_seqno);
         /// auto drops = actual_seqno - expected_seqno;
         ///
-        constexpr std::tuple<T, Seqno, Seqno> read() noexcept
+        std::tuple<T, Seqno, Seqno> read() noexcept
         {
             assert(data.ringbuff);
-            auto [result, new_seqno] = data.ringbuff->seq_locks[data.ringbuff->index(data.seqno)].read();
+            auto [result, new_seqno] = data.ringbuff->seq_locks[RingBuff::index(data.seqno)].read();
             assert(data.seqno <= new_seqno);
             auto expected_seqno = data.seqno;
             data.seqno = new_seqno + 1;
@@ -185,7 +185,7 @@ public:
 private:
     friend class Writer;
     friend class Reader;
-    constexpr auto index(Seqno seqno) const noexcept
+    constexpr static auto index(Seqno seqno) noexcept
     {
         return seqno & (capacity-1);
     }
@@ -325,7 +325,7 @@ public:
         /// Provides strong exception safety guarantee at a minimum and nothrow guranteed if corresponding
         /// Constructor of T doesn't throw
         ///
-        constexpr bool write(auto&&... args) noexcept(std::is_nothrow_constructible_v<T, decltype(args)...>)
+        bool write(auto&&... args) noexcept(std::is_nothrow_constructible_v<T, decltype(args)...>)
                     requires(reader_count==1UL  ||                  // Can't provide strong exception safety if atleast one of these is not true.
                              std::is_trivially_destructible_v<T> ||
                              std::is_nothrow_constructible_v<T, decltype(args)...>)
@@ -343,10 +343,10 @@ public:
             {
                 if(seqno > capacity)
                 {
-                    ringbuff.storage.destroy_at(ringbuff.index(in_progress_seqno)); // lazy destruction in writer thread when lapping
+                    ringbuff.storage.destroy_at(RingBuff::index(in_progress_seqno)); // lazy destruction in writer thread when lapping
                 }
             }
-            ringbuff.storage.construct_at(ringbuff.index(seqno), std::forward<decltype(args)>(args)...);
+            ringbuff.storage.construct_at(RingBuff::index(seqno), std::forward<decltype(args)>(args)...);
             committed_seqno.store(seqno+1, std::memory_order_release);
             return true;
         }
@@ -362,7 +362,7 @@ public:
         /// No improvements were observed increasing it further.
         ///
         template<std::size_t max_slots=1UL> requires (max_slots != 0UL)
-        constexpr std::size_t acquire() noexcept
+        std::size_t acquire() noexcept
         {
             if(in_progress_seqno == cached_reader_seqno + capacity) [[unlikely]] //: No improvement noted and may worsen performance when a reader isn't keeping up
             {
@@ -383,7 +383,7 @@ public:
         /// Provides strong exception safety guarantee.
         /// If reader_count > 1, relevant constructor of T cannot throw to provide strong exception safety.
         ///
-        constexpr void emplace(auto &&... args) noexcept (std::is_nothrow_constructible_v<T, decltype(args)...>)
+        void emplace(auto &&... args) noexcept (std::is_nothrow_constructible_v<T, decltype(args)...>)
                     requires(reader_count==1UL || // Can't provide strong exception safety if at least one of these are not true.
                              std::is_trivially_destructible_v<T> ||
                              std::is_nothrow_constructible_v<T, decltype(args)...>)
@@ -401,10 +401,10 @@ public:
             {
                 if(in_progress_seqno > capacity)
                 {
-                    ringbuff.storage.destroy_at(ringbuff.index(in_progress_seqno)); // lazy destruction in writer thread when lapping
+                    ringbuff.storage.destroy_at(RingBuff::index(in_progress_seqno)); // lazy destruction in writer thread when lapping
                 }
             }
-            ringbuff.storage.construct_at(ringbuff.index(in_progress_seqno), std::forward<decltype(args)>(args)...);
+            ringbuff.storage.construct_at(RingBuff::index(in_progress_seqno), std::forward<decltype(args)>(args)...);
             ++in_progress_seqno;
         }
 
@@ -416,7 +416,7 @@ public:
         /// to make sure that previous objects written using prior emplace-s
         /// will be recorded into the ringbuffer.
         ///
-        constexpr void commit() noexcept
+        void commit() noexcept
         {
             committed_seqno.store(in_progress_seqno, std::memory_order_release);
         }
@@ -430,7 +430,7 @@ public:
     private:
         friend class RingBuff;
 
-        constexpr Seqno seqno() const noexcept
+        Seqno seqno() const noexcept
         {
             return committed_seqno.load(std::memory_order_acquire);
         }
@@ -456,7 +456,7 @@ public:
 
         constexpr Reader(Reader const&) = default;
 
-        constexpr Reader& operator = (Reader const& rhs) noexcept //Forced by std::array.
+        Reader& operator = (Reader const& rhs) noexcept // TODO: Remove/Fix - Forced by std::array.
         {
             cached_writer_seqno = rhs.cached_writer_seqno;
             in_progress_seqno = rhs.in_progress_seqno;
@@ -474,7 +474,7 @@ public:
         /// halves the writer's throughput.
         ///
         template<std::size_t max_slots=1UL> requires (max_slots != 0UL)
-        constexpr std::size_t acquire() noexcept
+        std::size_t acquire() noexcept
         {
             assert(ringbuff);
             if(in_progress_seqno == cached_writer_seqno) //[[likely]] if reader is always ready/up with the writer.
@@ -488,26 +488,26 @@ public:
         /// non-mutable read.
         /// Must invoke pop to finally mark the read transaction as complete.
         ///
-        constexpr T const& read() const noexcept
+        T const& read() const noexcept
         {
             assert(ringbuff);
-            return ringbuff->storage[ringbuff->index(in_progress_seqno)];
+            return ringbuff->storage[RingBuff::index(in_progress_seqno)];
         }
 
         ///
         /// pop() must be invoked to make sure that reader progresses after read.
         ///
-        constexpr void pop() noexcept
+        void pop() noexcept
         {
             if constexpr(reader_count == 1)
             {
                 assert(ringbuff);
-                ringbuff->storage.destroy_at(ringbuff->index(in_progress_seqno));
+                ringbuff->storage.destroy_at(RingBuff::index(in_progress_seqno));
             }
             ++in_progress_seqno;
         }
 
-        constexpr void commit() noexcept
+        void commit() noexcept
         {
             committed_seqno.store(in_progress_seqno, std::memory_order_release);
         }
@@ -520,7 +520,7 @@ public:
     private:
         friend class RingBuff;
 
-        constexpr Seqno seqno() const noexcept
+        Seqno seqno() const noexcept
         {
             return committed_seqno.load(std::memory_order_acquire);
         }
@@ -565,12 +565,12 @@ public:
         }
     }
 private:
-    constexpr Seqno snoop_writer() const noexcept
+    Seqno snoop_writer() const noexcept
     {
         return writer.seqno();
     }
 
-    constexpr Seqno snoop_readers() const noexcept
+    Seqno snoop_readers() const noexcept
     {
         // For a single reader, this function gets collapsed to return reader.seqno();
         auto min = std::numeric_limits<Seqno>::max();
@@ -583,7 +583,7 @@ private:
 
     friend class Writer;
     friend class Reader;
-    constexpr auto index(std::size_t seqno) const noexcept
+    constexpr static auto index(std::size_t seqno) noexcept
     {
         return seqno & (capacity-1);
     }

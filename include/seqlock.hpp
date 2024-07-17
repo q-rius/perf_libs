@@ -41,7 +41,7 @@ public:
     /// definition.
     /// https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p0960r3.html
     ///
-    constexpr void emplace(Seqno seqno, auto&&... args) noexcept requires (std::is_trivially_constructible_v<T, decltype(args)...>)
+    void emplace(Seqno seqno, auto&&... args) noexcept requires (std::is_trivially_constructible_v<T, decltype(args)...>)
     {
         assert(data.version < seqno * 2 + 2 && "incoming seqno has to be monotonically increasing");
         data.version.store(seqno * 2 + 1, std::memory_order_release);
@@ -60,7 +60,7 @@ public:
     /// Must be true before attempting to read
     /// So this may be used as the polling API for the reader.
     ///
-    constexpr bool read_ready(Seqno expected_seqno) const noexcept
+    bool read_ready(Seqno expected_seqno) const noexcept
     {
         auto requested_version = expected_seqno * 2 + 2;
         auto curr_version = data.version.load(std::memory_order_relaxed);
@@ -82,7 +82,7 @@ public:
     /// T's copy constructor shouldn't throw which is a given from the
     /// already enforced stricter requirement that T must be trivially copyable.
     ///
-    constexpr std::pair<T, Seqno> read() const noexcept
+    std::pair<T, Seqno> read() const noexcept
     {
         while(true)
         {

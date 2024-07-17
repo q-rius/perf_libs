@@ -78,18 +78,18 @@ using CachelinePadd = std::byte[cacheline_padding<T...>];
 #endif
 }
 
-inline constexpr bool test_alignment(auto const& value, std::size_t alignment) noexcept
+inline bool test_alignment(auto const& value, std::size_t alignment) noexcept
 {
     return std::bit_cast<const std::uintptr_t>(std::addressof(value)) % alignment == 0UL;
 }
 
-inline constexpr bool test_alignment_ptr(auto* ptr, std::size_t alignment) noexcept
+inline bool test_alignment_ptr(auto* ptr, std::size_t alignment) noexcept
 {
     assert(ptr && "Likely a bug, attempting to test alignment of nullptr");
     return std::bit_cast<const std::uintptr_t>(ptr) % alignment == 0UL;
 }
 
-inline constexpr bool test_cacheline_align(auto const& value) noexcept
+inline bool test_cacheline_align(auto const& value) noexcept
 {
     return std::bit_cast<const std::uintptr_t>(std::addressof(value)) % cacheline_size == 0UL;
 }
