@@ -1,9 +1,9 @@
 #ifndef QRIUS_INCLUDE_GUARD_MULTICAST_RINGBUFF_HPP
 #define QRIUS_INCLUDE_GUARD_MULTICAST_RINGBUFF_HPP
 
-#include "perf_utils.hpp"
-#include "seqlock.hpp"
-#include "uninitialized_storage.hpp"
+#include <perf_utils.hpp>
+#include <seqlock.hpp>
+#include <uninitialized_storage.hpp>
 
 #include <cstddef>
 #include <tuple>
@@ -110,7 +110,7 @@ public:
             : data{0, ringbuff}
         {}
 
-        constexpr void emplace(auto&&... args) noexcept
+        void emplace(auto&&... args) noexcept
         {
             data.ringbuff.seq_locks[RingBuff::index(data.seqno)].emplace(data.seqno, std::forward<decltype(args)>(args)...);
             ++data.seqno;
