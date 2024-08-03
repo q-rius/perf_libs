@@ -4,7 +4,7 @@
 #undef NDEBUG
 #endif
 
-#include "multicast_ringbuff.hpp"
+#include <multicast_ringbuff.hpp>
 #include <cstdint>
 #include <iostream>
 #include <thread>
@@ -319,7 +319,7 @@ void concurrent_seqlock_test(std::size_t test_items)
 }
 
 template<std::size_t reader_count=4UL>
-void concurrent_non_blocking_ringbuff_test(std::size_t test_items=1'000'000UL)
+static void concurrent_non_blocking_ringbuff_test(std::size_t test_items=1'000'000UL)
 {
     struct Data
     {
@@ -446,7 +446,7 @@ static void non_blocking_ringbuff_test()
 /// throws if the host doesn't have adequate number of huge pages enabled
 /// Create a few huge pages before the test is run. For ref: huge_page.sh.
 ///
-void huge_page_alloc_test()
+static void huge_page_alloc_test()
 {
     {
         auto& seq_lock = *qrius::make_unique_on_huge_pages<qrius::Seqlock<int>>();

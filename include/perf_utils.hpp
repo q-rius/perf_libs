@@ -228,7 +228,7 @@ inline void clflush_region(T const* region, std::size_t size) noexcept
     std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
-inline void force_page_fault(std::byte* region, std::size_t size) noexcept
+inline constexpr void force_page_fault(std::byte* region, std::size_t size) noexcept
 {
     assert(size>0);
     for(auto byte=region; byte < region+size; byte += page_size)

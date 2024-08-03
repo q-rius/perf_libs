@@ -1,11 +1,12 @@
 #ifndef QRIUS_INCLUDE_GUARD_UNINITIALIZED_STORAGE_HPP
 #define QRIUS_INCLUDE_GUARD_UNINITIALIZED_STORAGE_HPP
 
-#include "perf_utils.hpp"
+#include <perf_utils.hpp>
 
 #include <cstddef>
 #include <type_traits>
 #include <memory>
+#include <array>
 
 namespace qrius
 {
@@ -25,35 +26,71 @@ template<typename T, std::size_t size, bool force_page_fault_at_init=true> requi
 class UninitializedStorage
 {
 public:
+    UninitializedStorage() requires (!force_page_fault_at_init) = default;
+
     constexpr UninitializedStorage() noexcept
     {
-        assert(test_alignment(storage[0], cacheline_align<T>));
-        if constexpr(force_page_fault_at_init)
+        static_assert(force_page_fault_at_init); // so we are ok to compromise on constexpr-ness.
+        if constexpr (can_be_array)
+        {
+            force_page_fault(reinterpret_cast<std::byte*>(&storage[0]), sizeof(storage));
+        }
+        else
         {
             force_page_fault(storage, sizeof(storage));
         }
     }
-    T& operator [] (std::size_t at) noexcept
+
+    constexpr T& operator [] (std::size_t at) noexcept
     {
-        return *std::launder(reinterpret_cast<T*>(&storage[at*sizeof(T)]));
+        if constexpr (can_be_array)
+        {
+            return storage[at];
+        }
+        else
+        {
+            return *std::launder(reinterpret_cast<T*>(&storage[at*sizeof(T)]));
+        }
     }
 
-    T const& operator [] (std::size_t at) const noexcept
+    constexpr T const& operator [] (std::size_t at) const noexcept
     {
-        return *std::launder(reinterpret_cast<T const*>(&storage[at*sizeof(T)]));
+        if constexpr (can_be_array)
+        {
+            return storage[at];
+        }
+        else
+        {
+            return *std::launder(reinterpret_cast<T const*>(&storage[at*sizeof(T)]));
+        }
     }
 
-    void construct_at(std::size_t at, auto&&... args) noexcept(std::is_nothrow_constructible_v<T, decltype(args)...>)
+    constexpr void construct_at(std::size_t at, auto&&... args) noexcept(std::is_nothrow_constructible_v<T, decltype(args)...>)
     {
-        std::construct_at(std::launder(reinterpret_cast<T*>(&storage[at*sizeof(T)])), std::forward<decltype(args)>(args)...);
+        if constexpr (can_be_array)
+        {
+            std::construct_at(&storage[at], std::forward<decltype(args)>(args)...);
+        }
+        else
+        {
+            std::construct_at(std::launder(reinterpret_cast<T*>(&storage[at*sizeof(T)])), std::forward<decltype(args)>(args)...);
+        }
     }
 
-    void destroy_at(std::size_t at) noexcept
+    constexpr void destroy_at(std::size_t at) noexcept
     {
-        std::destroy_at(std::launder(reinterpret_cast<T*>(&storage[at*sizeof(T)])));
+        if constexpr (!can_be_array)
+        {
+            std::destroy_at(std::launder(reinterpret_cast<T*>(&storage[at*sizeof(T)])));
+        }
     }
 private:
-    alignas(alignof(T)) std::byte storage[sizeof(T)*size];
+    constexpr static auto can_be_array = std::is_trivially_constructible_v<T> && std::is_trivially_destructible_v<T>;
+    using ByteStorage = std::byte[sizeof(T)*size];
+    using StorageType = std::conditional_t<can_be_array,
+                                           std::array<T, size>,
+                                           ByteStorage>;
+    alignas(alignof(T)) StorageType storage;
 };
 
 }

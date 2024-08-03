@@ -1,11 +1,14 @@
 #ifndef QRIUS_INCLUDE_GUARD_PERF_TEST_HPP
 #define QRIUS_INCLUDE_GUARD_PERF_TEST_HPP
 
+#include <perf_utils.hpp>
+
 #include <thread>
 #include <future>
 #include <barrier>
 #include <iostream>
 #include <chrono>
+#include <cassert>
 
 namespace qrius
 {

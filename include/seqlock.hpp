@@ -1,5 +1,6 @@
 #ifndef QRIUS_INCLUDE_GUARD_SEQLOCK_HPP
 #define QRIUS_INCLUDE_GUARD_SEQLOCK_HPP
+
 #include <type_traits>
 #include <cassert>
 #include <atomic>
