@@ -36,6 +36,7 @@ static constexpr void perf_utils_test() noexcept
             int     d;
             char    e;
         };
+#if 0
         static_assert(qrius::cacheline_padding<char&, int&, double, int, char> == qrius::cacheline_size - sizeof(Data));
         static_assert(sizeof(qrius::CachelinePadd<char&, int&, double, int, char>) == qrius::cacheline_size - sizeof(Data));
         {
@@ -45,6 +46,7 @@ static constexpr void perf_utils_test() noexcept
             };
             static_assert(sizeof(PaddedData) == qrius::cacheline_size);
         }
+#endif
         {
             struct PaddedData : Data
             {

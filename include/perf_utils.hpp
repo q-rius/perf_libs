@@ -27,44 +27,12 @@ constexpr inline auto page_size = 4096UL;
 template<typename T>
 inline constexpr std::size_t cacheline_align = std::max(cacheline_size, alignof(T));
 
-///
-/// Just a helper for cacheline_padding in bytes for a series of fields that
-/// needs to be grouped together in cachelines inside a struct or class.
-/// Note there may be complex struct layouts where this may not work.
-///
-/// struct Foo
-/// {
-///     int a;
-///     int& b;
-///     char c;
-///     std::byte padding[calculating_manually_is_error_prone_due_to_padding_between_the_fields];
-/// };
-///
-/// instead use
-///
-/// struct Foo
-/// {
-///     int  a;
-///     int& b;
-///     char c;
-///     CachelinePadd<int, int&, char> padd{}; // a, b, c will stay in the cacheline assuming Foo is at least aligned to cacheline.
-/// };
-///
-/// or
-///
-/// struct Foo : FooBase
-/// {
-///    CachelinePadd<FooBase> padd{};
-/// };
-/// Assumes std::tuple generates the same memory layout as a struct with members defined in the same level (non-nested/non-composed).
-///
-
-template<typename... T>
-inline constexpr auto cacheline_padding = sizeof(std::tuple<T...>) % cacheline_size
-                                                ? cacheline_size - (sizeof(std::tuple<T...>) % cacheline_size)
+template<typename T>
+inline constexpr auto cacheline_padding = sizeof(std::tuple<T>) % cacheline_size
+                                                ? cacheline_size - (sizeof(std::tuple<T>) % cacheline_size)
                                                 : 0UL;
-template<typename... T>
-using CachelinePadd = std::byte[cacheline_padding<T...>];
+template<typename T>
+using CachelinePadd = std::byte[cacheline_padding<T>];
 
 [[noreturn]] inline void unreachable()
 {
