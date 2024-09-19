@@ -17,18 +17,18 @@ namespace qrius
 /// This is not a generic storage implementation in the sense, it
 /// doesn't manage the lifetime of the objects in the storage.
 /// Objects have to be constructed and destroyed using the relevant APIs provided here
-/// by the user i.e. when UninitializedStorage goes out of scope, it doesn't invoke
+/// by the user i.e. when UninitializedArray goes out of scope, it doesn't invoke
 //  the destructors of any objects that may be constructed in the storage.
 /// For the use cases this is intended for, there is specific lifetime management
 /// required for each object.
 ///
 template<typename T, std::size_t size, bool force_page_fault_at_init=true> requires (size > 0UL)
-class UninitializedStorage
+class UninitializedArray
 {
 public:
-    UninitializedStorage() requires (!force_page_fault_at_init) = default;
+    UninitializedArray() requires (!force_page_fault_at_init) = default;
 
-    constexpr UninitializedStorage() noexcept
+    constexpr UninitializedArray() noexcept
     {
         static_assert(force_page_fault_at_init); // so we are ok to compromise on constexpr-ness.
         if constexpr (can_be_array)

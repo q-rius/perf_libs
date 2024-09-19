@@ -16,6 +16,10 @@ add_executable(multicast_ringbuff_unittest bin/multicast_ringbuff_unittest.cpp)
 target_include_directories(multicast_ringbuff_unittest PUBLIC "include/")
 target_compile_features(multicast_ringbuff_unittest PUBLIC cxx_std_23)
 
+add_executable(disruptor_test bin/disruptor_test.cpp)
+target_include_directories(disruptor_test PUBLIC "include/")
+target_compile_features(disruptor_test PUBLIC cxx_std_23)
+
 set(CMAKE_CXX_COMPILER "/usr/bin/g++-13")
 include(CTest)
 enable_testing()

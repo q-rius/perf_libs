@@ -590,7 +590,7 @@ private:
 
     alignas(cacheline_align<Writer>) Writer                             writer;
     alignas(cacheline_align<Reader>) std::array<Reader, reader_count>   readers;
-    alignas(cacheline_align<T>) UninitializedStorage<T, capacity, true> storage;
+    alignas(cacheline_align<T>) UninitializedArray<T, capacity, true> storage;
     CachelinePadd<decltype(storage)>                                    padd{};
 };
 
