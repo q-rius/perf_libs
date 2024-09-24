@@ -9,6 +9,7 @@
 
 #include <type_traits>
 #include <array>
+#include <algorithm>
 
 namespace qrius
 {
@@ -250,7 +251,7 @@ class Barrier
         return committed_seqno.load(std::memory_order_relaxed);
     }
 
-    void update_seqno(Seqno seqno)
+    void update_seqno(Seqno seqno) noexcept
     {
         committed_seqno.store(seqno, std::memory_order_release);
     }
@@ -258,13 +259,34 @@ class Barrier
     std::atomic<Seqno> committed_seqno{0};
 };
 
-template<std::size_t capacity, typename... Elems>
+namespace dag
+{
+
+template<std::size_t level, std::size_t next_stages>
+class Stage
+{
+    static constexpr auto level = level;
+    static constexpr auto next_stages = next_stages;
+    static constexpr bool last_stage = false;
+};
+
+template<std::size_t level>
+class Stage<level, 0>
+{
+    static constexpr auto level = level;
+    static constexpr auto next_stages = 0UL;
+    static constexpr bool last_stage = true;
+};
+
+}
+
+template<std::size_t capacity, std::size_t final_stage_count, typename... Elems> requires(final_stage_count != 0UL)
 class Disruptor
 {
   public:
-    class Consumer;
     using RingBufferT = RingBuffer<capacity, Elems...>;
 
+    template<std::size_t deps>
     class Producer
     {
       public:
@@ -272,20 +294,24 @@ class Disruptor
             : ring_buffer(disruptor.ring_buffer)
         {}
 
-        void set_barrier(Barrier& barrier)
+        void set_barrier(std::array<Barrier*, deps> const& barriers)
         {
-            consumer_barrier = &barrier;
+            consumer_barriers = barriers;
         }
 
         template<typename Elem, typename... Args>
         void write(Args&&... args) noexcept(std::is_nothrow_constructible_v<Elem, Args...>)
         {
-            assert(consumer_barrier && "consumer that last commits to ring must be known to the writer");
+            assert(consumer_barriers && "consumer that last commits to ring must be known to the writer");
             auto seqno = barrier.seqno();
             assert(cached_consumer_seqno + capacity <= seqno);
             while(cached_consumer_seqno + capacity == seqno)
             {
-                cached_consumer_seqno = barrier->snoop_seqno();
+                cached_consumer_seqno = std::ranges::min_element(consumer_barriers,
+                                                                 [](auto a, auto b)
+                                                                 {
+                                                                    return a->snoop_seqno() < b->snoop_seqno();
+                                                                 });
             }
             ring_buffer.construct_at(seqno, std::forward<Args>(args)...);
             barrier.update_seqno(seqno+1);
@@ -293,12 +319,13 @@ class Disruptor
 
       private:
         RingBufferT& ring_buffer;
-        Barrier*   consumer_barrier;
+        std::array<Barrier*, final_stage_count>   consumer_barriers;
         Seqno     cached_consumer_seqno{0};
         alignas(cacheline_size) Barrier barrier;
+        CachelinePadd<Barrier>  padd;
     };
 
-    template<std::size_t deps=1>
+    template<std::size_t deps=1, bool final_stage=1>
     class Consumer
     {
       public:
@@ -306,16 +333,94 @@ class Disruptor
             : ring_buffer(disruptor.ring_buffer)
         {}
     
-        void set_dependencies(std::array<Barrier*, deps> const& deps) noexcept
+        void set_dependencies(std::array<Barrier*, deps> const& dep_barriers) noexcept
         {
-            dependernt_barriers = deps;
+            dependent_barriers = dep_barriers;
         }
 
+        std::size_t acquire() noexcept 
+        {
+            assert(cached_dependent_seqno >= in_progress_seqno);
+            auto const seqno = in_progress_seqno;
+            while(cached_dependent_seqno == seqno)
+            {
+                cached_dependent_seqno = std::ranges::min_element(dependent_barriers,
+                                                                  [](auto a, auto b)
+                                                                  {
+                                                                    return a->snoop_seqno() < b->snoop_seqno();
+                                                                  });
+
+            }
+            assert(cached_dependent_seqno > seqno);
+            return cached_dependent_seqno - seqno;
+        }
+
+        template<typename T>
+        T const& read() const noexcept
+        {
+            return ring_buffer. template get<T>(in_progress_seqno);
+        }
+
+        template<typename T>
+        T& read() & noexcept
+        {
+            return ring_buffer. template get<T>(in_progress_seqno);
+        }
+
+        template<typename T>
+        T&& read() && noexcept(std::is_nothrow_move_constructible_v<T>)
+        {
+            return ring_buffer. template get<T>(in_progress_seqno);
+        }
+
+        void mark() noexcept requires(!final_stage || final_stage_count>1)
+        {
+            ++in_progress_seqno;
+        }
+
+        void pop() noexcept requires(final_stage && final_stage_count==1)
+        {
+            if constexpr(final_stage && final_stage_count==1)
+            {
+                ring_buffer.destroy_at(in_progress_seqno);
+            }
+            ++in_progress_seqno;
+        }
+
+        void commit() noexcept
+        {
+            barrier.update_seqno(in_progress_seqno);
+        }
+
+        ~Consumer() requires (final_stage && final_stage_count==1)
+        {
+            clear();
+        }
       private:
-        RingBufferT& ring_buffer;
-        Seqno        cached_dependent_seqno{0};
+        void snoop_seqno() noexcept
+        {
+            cached_dependent_seqno = std::ranges::min_element(dependent_barriers,
+                                                              [](auto a, auto b)
+                                                              {
+                                                                    return a->snoop_seqno() < b->snoop_seqno();
+                                                              });
+
+        }
+        void clear() requires (final_stage && final_stage_count==1)
+        {
+            snoop_seqno();
+            for(auto seqno=in_progress_seqno; seqno <= cached_dependent_seqno; ++seqno)
+            {
+                ring_buffer.destroy_at(seqno);
+            }
+        }
+
+        RingBufferT&                ring_buffer;
+        Seqno                       cached_dependent_seqno{0};
+        Seqno                       in_progress_seqno{0};
         std::array<Barrier*, deps>  dependent_barriers;
-        Barrier      barrier;
+        alignas(cacheline_size) Barrier      barrier;
+        CachelinePadd<Barrier>  padd;
     };
   private:
     RingBuffer<capacity, Elems...> ring_buffer;
