@@ -23,38 +23,6 @@ static constexpr void perf_utils_test() noexcept
         };
         static_assert(qrius::cacheline_align<AlignmentTest> == 256UL);
     }
-    {
-        static_assert(qrius::cacheline_padding<int> == qrius::cacheline_size - sizeof(int));
-        static_assert(qrius::cacheline_padding<char[130]> == 62UL);
-        static_assert(!qrius::cacheline_padding<char[192]>);
-        static_assert(qrius::cacheline_padding<char&> == qrius::cacheline_size - sizeof(char*));
-        struct Data
-        {
-            char&   a;
-            int&    b;
-            double  c;
-            int     d;
-            char    e;
-        };
-#if 0
-        static_assert(qrius::cacheline_padding<char&, int&, double, int, char> == qrius::cacheline_size - sizeof(Data));
-        static_assert(sizeof(qrius::CachelinePadd<char&, int&, double, int, char>) == qrius::cacheline_size - sizeof(Data));
-        {
-            struct PaddedData : Data
-            {
-                qrius::CachelinePadd<char&, int&, double, int, char> padd{};
-            };
-            static_assert(sizeof(PaddedData) == qrius::cacheline_size);
-        }
-#endif
-        {
-            struct PaddedData : Data
-            {
-                qrius::CachelinePadd<Data> padd{};
-            };
-            static_assert(sizeof(PaddedData) == qrius::cacheline_size);
-        }
-    }
 }
 
 static void blocking_ringbuff_test()
@@ -404,11 +372,11 @@ static void non_blocking_ringbuff_test()
         using MCRingBuff = qrius::RingBuff<std::uint64_t, 1, 1, true>;
         MCRingBuff ring_buff;
         auto &writer = ring_buff.get_writer();
-        static_assert(sizeof(writer) == 64UL);
-        static_assert(sizeof(std::array<MCRingBuff::Writer, 2>) == 64*2);
+        static_assert(sizeof(writer) == 128UL);
+        static_assert(sizeof(std::array<MCRingBuff::Writer, 2>) == 128*2);
         auto &reader = ring_buff.get_reader(0UL);
-        static_assert(sizeof(reader) == 64UL);
-        static_assert(sizeof(ring_buff) == 64 + 64 + 64);
+        static_assert(sizeof(reader) == 128UL);
+        static_assert(sizeof(ring_buff) == 128 + 128 + 128);
         writer.emplace(13UL);
         assert(reader.data_available());
         auto [data, exp_seqno, actual_seqno] = reader.read();

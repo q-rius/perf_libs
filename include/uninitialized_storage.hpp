@@ -73,7 +73,7 @@ public:
         }
         else
         {
-            std::construct_at(std::launder(reinterpret_cast<T*>(&storage[at*sizeof(T)])), std::forward<decltype(args)>(args)...);
+            std::construct_at(reinterpret_cast<T*>(&storage[at*sizeof(T)]), std::forward<decltype(args)>(args)...);
         }
     }
 

@@ -84,9 +84,9 @@ public:
     using Seqno = typename Seqlock<T>::Seqno;
 
     constexpr RingBuff() noexcept
-        : writer(*this)
+        : writer{*this},
+          readers(make_readers())
     {
-        readers.fill(Reader(*this));
         assert(test_cacheline_align(writer));
         assert(test_cacheline_align(readers));
         assert(test_cacheline_align(seq_locks));
@@ -103,40 +103,38 @@ public:
         return readers[at];
     }
 
-    class Writer
+    class alignas(cacheline_isolation_size) Writer
     {
     public:
         constexpr Writer(RingBuff& ringbuff)
-            : data{0, ringbuff}
+            : ringbuff{ringbuff}
         {}
 
         void emplace(auto&&... args) noexcept
         {
-            data.ringbuff.seq_locks[RingBuff::index(data.seqno)].emplace(data.seqno, std::forward<decltype(args)>(args)...);
-            ++data.seqno;
+            ringbuff.seq_locks[RingBuff::index(seqno)].emplace(seqno, std::forward<decltype(args)>(args)...);
+            ++seqno;
         }
     private:
-        struct
-        {
-            Seqno     seqno{0};
-            RingBuff& ringbuff;
-        }data;
-        CachelinePadd<decltype(data)> padd{};
+        Seqno     seqno{};
+        RingBuff& ringbuff;
     };
 
-    class Reader
+    class alignas(cacheline_isolation_size) Reader
     {
     public:
-        Reader() = default; // This should be deleted but makes mayhem with Reader inside an std::array
+        Reader() = delete; // This should be deleted but makes mayhem with Reader inside an std::array
 
         constexpr Reader(RingBuff& ringbuff) noexcept
-            : data{0, &ringbuff}
+            : ringbuff{ringbuff}
         {}
+
+        Reader(const Reader&) = delete;
+        Reader(Reader&&) = delete;
 
         bool data_available() const noexcept
         {
-            assert(data.ringbuff);
-            return data.ringbuff->seq_locks[RingBuff::index(data.seqno)].read_ready(data.seqno);
+            return ringbuff.seq_locks[RingBuff::index(seqno)].read_ready(seqno);
         }
 
         ///
@@ -149,10 +147,9 @@ public:
         ///
         T read_data() noexcept
         {
-            assert(data.ringbuff);
-            auto [result, new_seqno] = data.ringbuff->seq_locks[RingBuff::index(data.seqno)].read(); // T must be trivially copyable
-            assert(data.seqno <= new_seqno);
-            data.seqno = new_seqno + 1;
+            auto [result, new_seqno] = ringbuff.seq_locks[RingBuff::index(seqno)].read(); // T must be trivially copyable
+            assert(seqno <= new_seqno);
+            seqno = new_seqno + 1;
             return result;
         }
 
@@ -166,34 +163,36 @@ public:
         ///
         std::tuple<T, Seqno, Seqno> read() noexcept
         {
-            assert(data.ringbuff);
-            auto [result, new_seqno] = data.ringbuff->seq_locks[RingBuff::index(data.seqno)].read();
-            assert(data.seqno <= new_seqno);
-            auto expected_seqno = data.seqno;
-            data.seqno = new_seqno + 1;
+            auto [result, new_seqno] = ringbuff.seq_locks[RingBuff::index(seqno)].read();
+            assert(seqno <= new_seqno);
+            auto expected_seqno = seqno;
+            seqno = new_seqno + 1;
             return {result, expected_seqno, new_seqno};
         }
     private:
-        struct
-        {
-            Seqno     seqno{0};
-            RingBuff* ringbuff{nullptr}; // TODO:Should have been a reference but forced by std::array.
-        }data;
-        CachelinePadd<decltype(data)> padd{};
+        Seqno     seqno{0};
+        RingBuff& ringbuff;
     };
 
 private:
     friend class Writer;
     friend class Reader;
+
+    constexpr auto make_readers() noexcept
+    {
+        return [&]<std::size_t... indices>(std::index_sequence<indices...>) noexcept
+            {
+                return std::array{((void)indices, Reader{*this})...};
+            }(std::make_index_sequence<reader_count>{});
+    }
     constexpr static auto index(Seqno seqno) noexcept
     {
         return seqno & (capacity-1);
     }
 
-    alignas(cacheline_align<Writer>) Writer                                 writer;
-    alignas(cacheline_align<Reader>) std::array<Reader, reader_count>       readers;
-    alignas(cacheline_align<Seqlock<T>>) std::array<Seqlock<T>, capacity>   seq_locks;
-    CachelinePadd<decltype(seq_locks)>                                      padd{};
+    Writer                                 writer;
+    std::array<Reader, reader_count>       readers;
+    alignas(cacheline_isolation_align<Seqlock<T>>) std::array<Seqlock<T>, capacity>   seq_locks;
 };
 
 template<typename RingBuff, typename Func>
@@ -284,10 +283,9 @@ public:
     using Seqno                         = std::size_t;
 
     constexpr RingBuff() noexcept
-        : writer(*this)
-    {
-        readers.fill(Reader(*this));
-    }
+        : writer(*this),
+          readers{make_readers()}
+    {}
 
     ///
     /// Sample usage of the batched writer.
@@ -305,7 +303,7 @@ public:
     ///                              // For strong exception safety, commit also must be invoked if emplace
     ///                              // throws (i.e. if T's relevant constructor throws).
     ///
-    class Writer
+    class alignas(cacheline_isolation_size) Writer
     {
     public:
         constexpr Writer(RingBuff& ringbuff)
@@ -439,31 +437,24 @@ public:
         Seqno                                       in_progress_seqno{0};
         RingBuff                                    &ringbuff;
         alignas(cacheline_size) std::atomic<Seqno>  committed_seqno{0};
-        CachelinePadd<decltype(committed_seqno)>    padd{};
     };
 
-    class Reader
+    class alignas(cacheline_isolation_size) Reader
     {
     public:
-        constexpr Reader() noexcept = default;
+        constexpr Reader() noexcept = delete;
 
         constexpr Reader(RingBuff& ringbuff) noexcept
-            : ringbuff(&ringbuff)
+            : ringbuff(ringbuff)
         {
             assert(test_cacheline_align(committed_seqno));
             assert(test_cacheline_align(cached_writer_seqno));
         }
 
-        constexpr Reader(Reader const&) = default;
+        constexpr Reader(Reader&&) = delete;
 
-        Reader& operator = (Reader const& rhs) noexcept // TODO: Remove/Fix - Forced by std::array.
-        {
-            cached_writer_seqno = rhs.cached_writer_seqno;
-            in_progress_seqno = rhs.in_progress_seqno;
-            ringbuff = rhs.ringbuff;
-            committed_seqno.store(rhs.committed_seqno.load());
-            return *this;
-        }
+        Reader(Reader const&) = delete;
+        Reader& operator = (Reader const& rhs) = delete;
 
         ///
         /// Increase max_slots only if there is proof that reader isn't keeping up
@@ -476,10 +467,9 @@ public:
         template<std::size_t max_slots=1UL> requires (max_slots != 0UL)
         std::size_t acquire() noexcept
         {
-            assert(ringbuff);
             if(in_progress_seqno == cached_writer_seqno) //[[likely]] if reader is always ready/up with the writer.
             {
-                cached_writer_seqno = ringbuff->snoop_writer();
+                cached_writer_seqno = ringbuff.snoop_writer();
             }
             return std::min(max_slots, cached_writer_seqno - in_progress_seqno);
         }
@@ -490,8 +480,7 @@ public:
         ///
         T const& read() const noexcept
         {
-            assert(ringbuff);
-            return ringbuff->storage[RingBuff::index(in_progress_seqno)];
+            return ringbuff.storage[RingBuff::index(in_progress_seqno)];
         }
 
         ///
@@ -501,8 +490,7 @@ public:
         {
             if constexpr(reader_count == 1)
             {
-                assert(ringbuff);
-                ringbuff->storage.destroy_at(RingBuff::index(in_progress_seqno));
+                ringbuff.storage.destroy_at(RingBuff::index(in_progress_seqno));
             }
             ++in_progress_seqno;
         }
@@ -527,9 +515,8 @@ public:
 
         Seqno                                       cached_writer_seqno{0};
         Seqno                                       in_progress_seqno{0};
-        RingBuff                                   *ringbuff{nullptr}; // TODO: Reference preferred but std::array forces this.
+        RingBuff&                                   ringbuff;
         alignas(cacheline_size) std::atomic<Seqno>  committed_seqno{0};
-        CachelinePadd<decltype(committed_seqno)>    padd{};
     };
 
     constexpr Writer& get_writer() noexcept
@@ -565,6 +552,14 @@ public:
         }
     }
 private:
+    constexpr auto make_readers() noexcept
+    {
+        return [&]<std::size_t... indices>(std::index_sequence<indices...>) noexcept
+        {
+            return std::array{((void)indices, Reader{*this})...};
+        }(std::make_index_sequence<reader_count>{});
+    }
+
     Seqno snoop_writer() const noexcept
     {
         return writer.seqno();
@@ -588,10 +583,9 @@ private:
         return seqno & (capacity-1);
     }
 
-    alignas(cacheline_align<Writer>) Writer                             writer;
-    alignas(cacheline_align<Reader>) std::array<Reader, reader_count>   readers;
-    alignas(cacheline_align<T>) UninitializedStorage<T, capacity, true> storage;
-    CachelinePadd<decltype(storage)>                                    padd{};
+    Writer                             writer;
+    std::array<Reader, reader_count>   readers;
+    alignas(cacheline_isolation_align<T>) UninitializedStorage<T, capacity, true> storage;
 };
 
 template<typename RingBuff, typename Func>
@@ -601,7 +595,7 @@ inline void read_all(typename RingBuff::Reader& reader, Func&& func)
     auto slots = reader.acquire();
     while(slots)
     {
-        for(auto slot=0UL; slot != slots; ++slots)
+        for(auto slot=0UL; slot != slots; ++slot)
         {
             std::invoke(func, reader.read());
             reader.pop();
