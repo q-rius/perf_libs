@@ -34,7 +34,6 @@ template<typename T> requires (std::atomic<T>::is_always_lock_free)
 struct AtomicVar
 {
     alignas(qrius::cacheline_align<T>) std::atomic<T> var;
-    qrius::CachelinePadd<decltype(var)> padd{};
 };
 
 template<typename T>
@@ -192,7 +191,6 @@ struct PaddedSeqlock
 {
     using Seqlock = qrius::Seqlock<T>;
     alignas(qrius::cacheline_align<Seqlock>) Seqlock seqlock;
-    qrius::CachelinePadd<Seqlock> padd;
 };
 
 template<typename T, std::size_t readers=1UL>
@@ -327,7 +325,6 @@ template<std::size_t capacity>
 struct Region
 {
     alignas(qrius::cacheline_size) std::array<std::size_t, capacity> elements{};
-    qrius::CachelinePadd<decltype(elements)>                         padd{};
 };
 
 template<std::size_t capacity, std::size_t readers=1UL>
@@ -387,7 +384,6 @@ struct RegionSeqno
 {
     alignas(qrius::cacheline_size) std::atomic<std::size_t> seqno{0UL};
     alignas(qrius::cacheline_size) std::array<std::size_t, capacity> elements;
-    qrius::CachelinePadd<decltype(elements)> padd{};
 };
 
 template<std::size_t capacity, std::size_t readers=1UL>
@@ -776,8 +772,7 @@ int main(int argc, char** argv)
 
     struct CacheAlignedData
     {
-        std::uint64_t data{};
-        qrius::CachelinePadd<decltype(data)> padd{};
+        alignas(qrius::cacheline_align<std::uint64_t>) std::uint64_t data{};
 
         auto operator == (CacheAlignedData const& rhs) const noexcept
         {
