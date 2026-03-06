@@ -530,6 +530,11 @@ public:
         return readers[at];
     }
 
+    ///
+    /// If T is not trivially_destructible, the destructor must run only
+    /// after the writer thread joins or in the writer thread itself.
+    /// Order of destruction is same as order of emplace.
+    ///
     ~RingBuff() noexcept
     {
         if constexpr (std::is_trivially_destructible_v<T>) return;
@@ -542,11 +547,13 @@ public:
         }
         else
         {
-            auto& writer = get_writer();
-            auto seqno = std::min(writer.seqno(), capacity);
-            for(auto i=0UL; i != seqno; ++i)
+            // guarantees destruction in the order of construction
+            // consistent with the behavior of emplace as writer laps.
+            const auto writer_seqno = get_writer().in_progress_seqno;
+            const auto start_seqno = writer_seqno < capacity ? 0UL : writer_seqno - capacity;
+            for(auto i=start_seqno; i != writer_seqno; ++i)
             {
-                storage.destroy_at(i);
+                storage.destroy_at(index(i));
             }
         }
     }
