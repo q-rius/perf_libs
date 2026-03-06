@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <cassert>
 #include <atomic>
+#include <memory>
 
 namespace qrius
 {
@@ -36,22 +37,14 @@ public:
     /// would need ~98 years to overflow on a 3GHZ processor.
     ///
     /// T must be trivially constructible from Args.
-    /// Note: Trivial constructibility requirements have been extended to
-    /// aggregate initializations that are individually trivial - in C++20.
-    /// Pre c++20, only default, copy and move constructors were only allowed by this
-    /// definition.
-    /// https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p0960r3.html
     ///
     void emplace(Seqno seqno, auto&&... args) noexcept requires (std::is_trivially_constructible_v<T, decltype(args)...>)
     {
         assert(data.version < seqno * 2 + 2 && "incoming seqno has to be monotonically increasing");
-        data.version.store(seqno * 2 + 1, std::memory_order_release);
-        // Portability of this needs to be analyzed.
-        // https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1478r1.html
-        // It should still be good enough for our needs.
+        data.version.store(seqno * 2 + 1, std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_release); // This is nop on x86_64 and very expensive on ARM - but is required for correctness.
         std::construct_at(&data.storage.value, std::forward<decltype(args)>(args)...);
-        std::atomic_thread_fence(std::memory_order_release); //TODO: Need to validate generated code on non-X86_64 architectures.
-        data.version.store(seqno*2 + 2, std::memory_order_relaxed);
+        data.version.store(seqno*2 + 2, std::memory_order_release); // This is nop on x86_64 and very expensive on ARM - but is required for correctness.
     }
 
     ///
@@ -89,10 +82,16 @@ public:
         {
             auto const before = data.version.load(std::memory_order_acquire);
             // Portability of this needs to be analyzed.
+            // If another thread is simultaneously writing to data.storage.value,
+            // it's undefined behavior. So compiler is free to hoist the below
+            // copy outside the loop.
+            // This messes up the algorithm. Here, we are hoping the thread_fence
+            // should make the compiler realize there may be globally visible updates to the
+            // memory out this function's context - like via a signal handler or something
             // https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1478r1.html
             // It should still be good enough for our needs.
             auto result = data.storage.value;
-            std::atomic_thread_fence(std::memory_order_acquire);
+            std::atomic_thread_fence(std::memory_order_acquire); // This is nop on x86_64 and very expensive on ARM - but is required for correctness.
             auto const after = data.version.load(std::memory_order_relaxed);
 
             if(before == after && !(after & 1UL))   return {result, after/2 - 1};

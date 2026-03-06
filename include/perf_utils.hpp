@@ -24,15 +24,19 @@ namespace qrius
 constexpr inline auto cacheline_size = 64UL; // = std::hardware_destructive_interference_size
 constexpr inline auto page_size = 4096UL;
 
+///
+/// The prefetcher on intel operates on 128 byte aligned offsets - i.e. two cachelines.
+/// i.e. accessing address [0, 63] also brings the cacheline [64, 127] along.
+///      accessing cacheline [64, 127] brings the cacheline [0, 63] along.
+/// So this becomes the effective alignment to reduce cache coherence traffic when handling false sharing.
+///
+constexpr inline auto cacheline_isolation_size = 128UL;
+
 template<typename T>
 inline constexpr std::size_t cacheline_align = std::max(cacheline_size, alignof(T));
 
 template<typename T>
-inline constexpr auto cacheline_padding = sizeof(std::tuple<T>) % cacheline_size
-                                                ? cacheline_size - (sizeof(std::tuple<T>) % cacheline_size)
-                                                : 0UL;
-template<typename T>
-using CachelinePadd = std::byte[cacheline_padding<T>];
+inline constexpr std::size_t cacheline_isolation_align = std::max(cacheline_isolation_size, alignof(T));
 
 [[noreturn]] inline void unreachable()
 {
@@ -129,7 +133,7 @@ inline bool set_curr_thread_affinity(std::size_t core_id) noexcept
     cpu_set_t cpu_set;
     CPU_ZERO(&cpu_set);
     CPU_SET(core_id, &cpu_set);
-    return !sched_setaffinity(gettid(), core_id + 1, &cpu_set);
+    return !sched_setaffinity(gettid(), sizeof(cpu_set), &cpu_set);
 }
 
 ///
