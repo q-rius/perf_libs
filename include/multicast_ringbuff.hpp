@@ -397,7 +397,7 @@ public:
             //
             if constexpr (reader_count > 1 && !std::is_trivially_destructible_v<T>)
             {
-                if(in_progress_seqno > capacity)
+                if(in_progress_seqno >= capacity)
                 {
                     ringbuff.storage.destroy_at(RingBuff::index(in_progress_seqno)); // lazy destruction in writer thread when lapping
                 }
@@ -543,8 +543,7 @@ public:
         else
         {
             auto& writer = get_writer();
-            writer.commit();
-            auto seqno = index(writer.seqno());
+            auto seqno = std::min(writer.seqno(), capacity);
             for(auto i=0UL; i != seqno; ++i)
             {
                 storage.destroy_at(i);
