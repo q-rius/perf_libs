@@ -206,6 +206,7 @@ inline constexpr void force_page_fault(std::byte* region, std::size_t size) noex
     for(auto byte=region; byte < region+size; byte += page_size)
     {
         *byte = std::byte{'\0'};
+        std::atomic_signal_fence(std::memory_order_release); // This must be enough to prevent Dead Store Elimination.
     }
     *(region+size-1) = std::byte{'\0'};
 }
