@@ -42,7 +42,8 @@ public:
     {
         assert(data.version < seqno * 2 + 2 && "incoming seqno has to be monotonically increasing");
         data.version.store(seqno * 2 + 1, std::memory_order_relaxed);
-        std::atomic_thread_fence(std::memory_order_release); // This is nop on x86_64 and very expensive on ARM - but is required for correctness.
+        std::atomic_thread_fence(std::memory_order_release); // This acts as a compiler barrier (is nop) on x86_64 (from TSO) but expensive on ARM (is required for correctness)
+                                                             // A case where the extra silicon dedicated to load-store buffer unit proves its worth on x64_64.
         std::construct_at(&data.storage.value, std::forward<decltype(args)>(args)...);
         data.version.store(seqno*2 + 2, std::memory_order_release); // This is nop on x86_64 and very expensive on ARM - but is required for correctness.
     }
@@ -81,6 +82,11 @@ public:
         while(true)
         {
             auto const before = data.version.load(std::memory_order_acquire);
+            if(before&1)
+            {
+                asm("pause");
+                continue;
+            }
             // Portability of this needs to be analyzed.
             // If another thread is simultaneously writing to data.storage.value,
             // it's undefined behavior. So compiler is free to hoist the below
@@ -91,7 +97,8 @@ public:
             // https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p1478r1.html
             // It should still be good enough for our needs.
             auto result = data.storage.value;
-            std::atomic_thread_fence(std::memory_order_acquire); // This is nop on x86_64 and very expensive on ARM - but is required for correctness.
+            std::atomic_thread_fence(std::memory_order_acq_rel); // This acts as a compiler barrier (nop effectively) on x86_64 and is expensive on ARM - but is required for correctness.
+                                                                 // It forces the result.store to stay above the fence and after.load to stay below the fence.
             auto const after = data.version.load(std::memory_order_relaxed);
 
             if(before == after && !(after & 1UL))   return {result, after/2 - 1};
